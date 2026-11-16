@@ -33,12 +33,13 @@ webMAN netemu option the process is named `ps1_emu.self`), then:
 ```
 python ps3mapi_patch.py 192.168.1.85            # apply
 python ps3mapi_patch.py 192.168.1.85 --revert   # restore
-python ps3mapi_patch.py 192.168.1.85 --window-start 30   # crop more of the top
 ```
 
-`--window-start` is the first video line of the 224-line window (DuckStation uses 24).
-Games declare their own display start (Legend of Legaia: line 28 plus ~2 black lines in
-the frame), so 30 removed the top bar there. Raise it to crop more, lower it to show more.
+The overscan is adaptive, with no per-game value: the picture is shown in a 224-line
+window starting at video line 24 (DuckStation's NTSC overscan). If a game starts its
+display before line 24 the extra lines are cropped, like DuckStation. If it starts
+after line 24 (Legend of Legaia: line 28) the window is anchored to the game's own
+start, so no black bar is left at the top; the overflow at the bottom is cropped.
 
 It reads each patch site first and refuses to write unless the bytes are the stock
 ps1_netemu words. Nothing is written to disk; closing the game undoes it.

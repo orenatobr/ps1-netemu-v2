@@ -8,10 +8,11 @@ ps1_emu.self but runs ps1_netemu code), then:
 
 What it does:
   * analog mode on for the 8 pads;
-  * vertical "overscan" like DuckStation: the picture is placed in a fixed NTSC
-    window of video lines 24..248 instead of fitting the game's own display
-    range, so the black bars above/below disappear. 4:3 width is untouched.
-    NTSC only; PAL keeps the stock behavior.
+  * vertical "overscan" like DuckStation (NTSC): the picture is shown in a window
+    of 224 video lines starting at line 24, cropping what falls outside. Unlike a
+    fixed window, when a game starts its display AFTER line 24 the window is
+    anchored to the game's own start, so no black bar is left at the top.
+    4:3 width is untouched. PAL keeps the stock behavior.
 
 Every code site is read first; nothing is written unless the stock words match.
 """
@@ -26,30 +27,40 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 NTSC_STRETCH = 240 / 224  # nominal NTSC lines / DuckStation overscan window lines (24..248)
-OVERSCAN_START = 24  # DuckStation default; --window-start moves the 224-line window (e.g. 30)
+OVERSCAN_START = 24  # first line of the DuckStation NTSC overscan window
 
 
 def f32(x: float) -> int:
     return struct.unpack(">I", struct.pack(">f", x))[0]
 
 
-# (address, stock word, patched word, what)
+# (address, stock word, patched word, what). Order matters only loosely; the sites
+# are rewritten between two frames and each frame is consistent once all are done.
 CODE = (
+    # PAL block: f6 = 1.0, f0 = Y1, f7 = Y1 - 19 (so the clamp below is a no-op)
     (0x115808, 0x79200020, 0xC0C287F8, "PAL: f6 = 1.0 (no scaling)"),
-    (0x115810, 0xF80100C0, 0xF92100C0, "PAL: std r9 (r0 no longer needed)"),
-    (0x115AC4, 0xC1A28894, 0xC1A2AA24, "NTSC: c1 = 24*s from free slot"),
-    (0x115AC8, 0x79200020, 0xC0C2AA20, "NTSC: f6 = s"),
+    (0x115810, 0xF80100C0, 0xF92100C0, "PAL: std r9"),
+    (0x115814, 0xC8E100C0, 0xC80100C0, "PAL: lfd f0"),
+    (0x115818, 0xFCE03E9C, 0xFC00069C, "PAL: fcfid f0"),
+    (0x11581C, 0xFC003818, 0xECE06828, "PAL: f7 = Y1 - 19"),
+    # NTSC block: f13 = 24*s, f6 = s, f0 = Y1, f7 = 0.0
+    (0x115AC4, 0xC1A28894, 0xC1A2AA24, "NTSC: f13 = 24*s (free slot)"),
+    (0x115AC8, 0x79200020, 0xC0C2AA20, "NTSC: f6 = s (free slot)"),
     (0x115AD0, 0xF80100C0, 0xF92100C0, "NTSC: std r9"),
+    (0x115AD4, 0xC86100C0, 0xC80100C0, "NTSC: lfd f0"),
+    (0x115AD8, 0xFC601E9C, 0xFC00069C, "NTSC: fcfid f0"),
+    (0x115ADC, 0xFC001818, 0xC0E287FC, "NTSC: f7 = 0.0"),
+    # shared: top = s*(Y1-24); clamp to <= 0 (anchor to the game's start); bottom = top + s*rows
     (0x115824, 0xED806828, 0xED8069B8, "top    = s * (Y1 - c1)"),
+    (0x11586C, 0x419A0008, 0x60000000, "r30 is always 0 here: branch was always taken"),
+    (0x115870, 0xED8C602A, 0xFD8C61EE, "top    = min(top, 0)  (PAL: no-op)"),
     (0x115874, 0xEDAC082A, 0xEDA161BA, "bottom = top + s * rows"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
-def constants(window_start: int) -> tuple[tuple[int, int], ...]:
-    return (
-        (0x1BE750, f32(NTSC_STRETCH)),
-        (0x1BE754, f32(window_start * NTSC_STRETCH)),
-    )
-
+CONSTANTS = (
+    (0x1BE750, f32(NTSC_STRETCH)),
+    (0x1BE754, f32(OVERSCAN_START * NTSC_STRETCH)),
+)
 
 PAD_FLAG_BASE, PAD_STRIDE, PAD_COUNT = 0x2E7CD8, 0xD8, 8
 
@@ -79,7 +90,7 @@ def write_word(host: str, pid: str, addr: int, value: int) -> None:
         raise RuntimeError(f"write to 0x{addr:x} did not stick")
 
 
-def apply(host: str, revert: bool = False, window_start: int = OVERSCAN_START) -> None:
+def apply(host: str, revert: bool = False) -> None:
     pid = find_process(host)
     logger.info("emulator process %s", pid)
     sites = [(a, new if revert else old, old if revert else new, why) for a, old, new, why in CODE]
@@ -87,7 +98,7 @@ def apply(host: str, revert: bool = False, window_start: int = OVERSCAN_START) -
         found = read_word(host, pid, addr)
         if found != expect:
             raise RuntimeError(f"0x{addr:x}: expected {expect:08x}, found {found:08x}; not patching")
-    for addr, value in constants(window_start):  # constants first, so the new code never reads garbage
+    for addr, value in CONSTANTS:  # constants first, so the new code never reads garbage
         write_word(host, pid, addr, 0 if revert else value)
     for addr, _, new, why in sites:
         write_word(host, pid, addr, new)
@@ -101,8 +112,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("host")
     ap.add_argument("--revert", action="store_true")
-    ap.add_argument("--window-start", type=int, default=OVERSCAN_START,
-                    help="first video line of the 224-line window (default 24; raise it to crop the top)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    apply(args.host, args.revert, args.window_start)
+    apply(args.host, args.revert)
