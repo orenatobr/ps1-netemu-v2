@@ -29,7 +29,8 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    record of the game it just launched, `/dev_hdd0/tmp/wmtmp/last_game.txt`), finds the ISO9660 volume descriptor in any of three layouts (raw 2352-byte
    sectors with a 24 or 16 byte header, or 2048-byte sectors), reads `SYSTEM.CNF`, takes the executable name after
    `cdrom:` (`SLUS_006.62;1`) and turns it into the serial `SLUS-00662` (underscore to hyphen, dot dropped, upper
-   case). It opens `/dev_hdd0/savedata/vmc/SLUS-00662.VM1`; if the file does not exist it writes a blank formatted
+   case); the card is handed to the slots as `SLUS-00662.VM1`, with the extension, the form slot 2 uses (`PS1.VM1`) and the
+   one the Assign Slots menu matches against its list of cards. It opens `/dev_hdd0/savedata/vmc/SLUS-00662.VM1`; if the file does not exist it writes a blank formatted
    128 KB card (the same layout as any PS1 card: `MC` header, 15 free directory frames, 20 empty broken-sector frames,
    `0xFF` filler frames, empty blocks); an existing card is only opened and closed, never rewritten. That card
    becomes slot 1 (inserted, and registered with the system through `cellSysutilGameDataAssignVmc(0, name)`, which is what
@@ -43,7 +44,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    Vagrant Story and Chrono Cross are in the tests). Without that `(Disc 1)` file the disc's own serial is used, and
    other disc naming (`CD2`, `Disc2`) gets one card per disc. The earlier rule (a PS1 card in slot 2 moves to slot 1
    when slot 1 has none) stays as the fallback. Saves kept in the old shared `PS1.VM1` stay there: assign it to slot 2
-   in the emulator menu to copy them into a per-game card. 98 tests run the real emulator code in a PowerPC
+   in the emulator menu to copy them into a per-game card. 99 tests run the real emulator code in a PowerPC
    interpreter with a simulated file system and synthetic discs; it has not run on a console yet.
 
 ## Known limitations

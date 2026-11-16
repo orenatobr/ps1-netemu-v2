@@ -636,7 +636,7 @@ def test_each_game_gets_its_own_blank_card_named_after_its_serial(cave_elf, layo
     fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc(layout)})
     cpu, end = _hook(cave_elf, fs)
     card = CARD_DIR + "SLUS-00662.VM1"
-    assert cpu.r[30] == C.NAME_VA and cpu.cstr(C.NAME_VA) == "SLUS-00662" and cpu.r[28] == C.NAME_VA
+    assert cpu.r[30] == C.NAME_VA and cpu.cstr(C.NAME_VA) == "SLUS-00662.VM1" and cpu.r[28] == C.NAME_VA
     assert bytes(fs.files[card]) == _blank_card()
     assert end == M.STOCK_RESUME and not fs.fds  # the card is in slot 1 through the stock path; every file closed
 
@@ -658,7 +658,7 @@ def test_an_existing_card_is_only_put_in_slot_1(cave_elf):
 def test_the_serial_is_read_from_the_boot_line(cave_elf, line, serial):
     fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24), boot_line=line)})
     cpu, _ = _hook(cave_elf, fs)
-    assert cpu.cstr(C.NAME_VA) == serial and (CARD_DIR + serial + ".VM1") in fs.files
+    assert cpu.cstr(C.NAME_VA) == serial + ".VM1" and (CARD_DIR + serial + ".VM1") in fs.files
 
 
 @pytest.mark.parametrize("case", ["no path", "no disc", "no system.cnf", "no boot line", "open fails"])
@@ -709,14 +709,14 @@ def _chrono(discs):
 def test_every_disc_of_a_game_shares_the_card_of_disc_1(cave_elf, disc):
     fs = Fs(_chrono([1, 2, 3]))
     cpu, _ = _hook(cave_elf, fs, disc_path=CC.format(disc))
-    assert cpu.cstr(C.NAME_VA) == "SLUS-01041" and (CARD_DIR + "SLUS-01041.VM1") in fs.files
+    assert cpu.cstr(C.NAME_VA) == "SLUS-01041.VM1" and (CARD_DIR + "SLUS-01041.VM1") in fs.files
     assert not any(p.endswith(".VM1") and "01041" not in p for p in fs.files) and not fs.fds
 
 
 def test_a_later_disc_without_disc_1_uses_its_own_serial(cave_elf):
     fs = Fs(_chrono([2]))
     cpu, _ = _hook(cave_elf, fs, disc_path=CC.format(2))
-    assert cpu.cstr(C.NAME_VA) == "SLUS-01108" and not fs.fds
+    assert cpu.cstr(C.NAME_VA) == "SLUS-01108.VM1" and not fs.fds
 
 
 def test_the_emulators_own_path_buffer_is_left_alone(cave_elf):
@@ -730,7 +730,7 @@ def test_the_emulators_own_path_buffer_is_left_alone(cave_elf):
 def test_names_without_the_disc_pattern_keep_their_own_serial(cave_elf, name):
     fs = Fs({name: _disc((2352, 24), boot_line=b"BOOT = cdrom:\\SLUS_007.77;1\r\n")})
     cpu, _ = _hook(cave_elf, fs, disc_path=name)
-    assert cpu.cstr(C.NAME_VA) == "SLUS-00777"
+    assert cpu.cstr(C.NAME_VA) == "SLUS-00777.VM1"
 
 
 @pytest.mark.parametrize("title,serials", [
@@ -748,7 +748,7 @@ def test_any_multi_disc_game_shares_one_card_not_just_one_title(cave_elf, title,
     fs = Fs(files)
     cpu, _ = _hook(cave_elf, fs, disc_path="/dev_hdd0/PSXISO/" + title.format(disc) + ".bin")
     expected = serials[1].replace("_", "-").replace(".", "")
-    assert cpu.cstr(C.NAME_VA) == expected and not fs.fds
+    assert cpu.cstr(C.NAME_VA) == expected + ".VM1" and not fs.fds
     assert sum(1 for p in fs.files if p.endswith(".VM1")) == 1  # one card for the whole set
 
 
@@ -759,7 +759,7 @@ def test_without_a_path_the_game_comes_from_webmans_record(cave_elf, tail):
     files.update(_chrono([1, 2]))
     fs = Fs(files)
     cpu, end = _hook(cave_elf, fs, disc_path="")  # the emulator's own path buffer is empty, as under webMAN
-    assert cpu.cstr(C.NAME_VA) == "SLUS-01041" and cpu.r[30] == C.NAME_VA and not fs.fds
+    assert cpu.cstr(C.NAME_VA) == "SLUS-01041.VM1" and cpu.r[30] == C.NAME_VA and not fs.fds
     assert (CARD_DIR + "SLUS-01041.VM1") in fs.files and end == M.STOCK_RESUME
 
 
@@ -806,7 +806,7 @@ def test_the_motors_get_what_the_game_commands_even_if_the_stock_flag_blocks(elf
 def test_the_per_game_card_is_registered_as_slot_1_like_the_assign_slots_menu_does(cave_elf):
     fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24))})
     cpu, _ = _hook(cave_elf, fs)
-    assert [e for e in fs.log if e[0] == "assign"] == [("assign", 0, "SLUS-00662")]
+    assert [e for e in fs.log if e[0] == "assign"] == [("assign", 0, "SLUS-00662.VM1")]
     assert cpu.r[2] == TOC  # the TOC pointer survives the system call
 
 
@@ -814,3 +814,10 @@ def test_no_system_registration_when_there_is_no_per_game_card(cave_elf):
     fs = Fs({}, fail_open=set())
     _hook(cave_elf, fs, disc_path="", slot1="Other")
     assert not [e for e in fs.log if e[0] == "assign"]
+
+
+def test_the_name_given_to_slot_1_has_the_extension_like_the_one_in_slot_2(cave_elf):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24))})
+    cpu, _ = _hook(cave_elf, fs, slot2="PS1.VM1")
+    assert cpu.cstr(C.NAME_VA) == "SLUS-00662.VM1" and cpu.cstr(cpu.r[27]) == "PS1.VM1"
+    assert (CARD_DIR + "SLUS-00662.VM1") in fs.files and (CARD_DIR + "SLUS-00662.VM1.VM1") not in fs.files

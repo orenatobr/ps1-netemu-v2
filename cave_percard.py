@@ -7,7 +7,8 @@
      (raw 2352-byte sectors with a 24 or 16 byte header, or 2048-byte sectors);
   2. reads the root directory, finds SYSTEM.CNF, finds "cdrom:" in it and turns the executable name that
      follows (SLUS_006.62;1) into the serial "SLUS-00662" (underscore to hyphen, dot dropped, upper case),
-     kept in a 32-byte buffer in the data segment (NAME_VA);
+     kept in a 32-byte buffer in the data segment (NAME_VA) and finally given its extension (`SLUS-00662.VM1`), the
+     form the slots and the Assign Slots menu use for a card (slot 2 holds `PS1.VM1`);
   3. opens /dev_hdd0/savedata/vmc/<serial>.VM1; when it does not exist it writes a blank, formatted
      128 KB card (header and write-test frames "MC", 15 free directory frames, 20 empty broken-sector
      frames, 0xFF filler frames, empty data frames), the layout of any standard PS1 card.
@@ -152,6 +153,7 @@ def program() -> list[tuple]:
         ("label", "cpdone"),
         ("li", "r9", 0), ("add", "r10", "r26", "r25"), ("stb", "r9", 0, "r10"),
         ("cmpwi", "r25", 4), ("blt", "closefail"),
+        ("mr", "r22", "r25"),  # the serial's length, for the extension appended at the end
         ("mr", "r3", "r20"), ("bl", CLOSE),
         # the card file
         ("addi", "r3", "r1", PATH), ("lwz", "r4", FMT_TOC, "r2"), ("mr", "r5", "r26"), ("bl", SPRINTF),
@@ -188,6 +190,10 @@ def program() -> list[tuple]:
         ("addi", "r24", "r24", 1), ("cmpwi", "r24", 1024), ("blt", "frloop"),
         ("mr", "r3", "r20"), ("bl", CLOSE),
         ("label", "ok"),
+        # the slots and the Assign Slots menu name a card with its extension ("PS1.VM1"); the card path above used
+        # the bare serial, so ".VM1" goes on now
+        ("add", "r10", "r26", "r22"), ("lis", "r9", 0x2E56), ("ori", "r9", "r9", 0x4D31), ("stw", "r9", 0, "r10"),
+        ("li", "r9", 0), ("stb", "r9", 4, "r10"),
         ("li", "r3", 1), ("b", "out"),
         ("label", "closefail"),
         ("mr", "r3", "r20"), ("bl", CLOSE),
