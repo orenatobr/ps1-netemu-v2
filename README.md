@@ -8,20 +8,15 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    game's own `0x44` (set mode) still has the last word. Digital-only games such as Castlevania never send `0x43`,
    so they stay digital, and the menu toggle still works both ways. Two earlier approaches broke Castlevania and
    were dropped: analog forced at boot, and analog whenever a game clocked extra pad bytes.
-2. **Vertical overscan like DuckStation (NTSC), computed every frame from the display the game
-   declares, with no per-game value.** The picture is shown in a 224-line window from video
-   line 24, so the black bars above and below go away. The width is the original
-   emulator's: the image stays 4:3 and is not widened (an earlier version widened it by removing the emulator's
-   640/720 side margin, which was not requested, and it was reverted).
-   - A game that starts its display after line 24 is anchored to its own start (no bar on top).
-   - A game that declares more lines than the window is cropped like DuckStation does.
-   - A game that declares fewer lines than the window is stretched down to the screen edge
-     (no bar at the bottom), by up to a few percent.
-
-Tested on a CFW console with webMAN MOD 1.47.48, Legend of Legaia and Chrono Cross (NTSC), using the
-webMAN netemu option (the process is named `ps1_emu.self` but runs `ps1_netemu` code).
-PAL is not changed and not validated.
-
+2. **DuckStation-style vertical overscan, cropped to the area the game really draws.** The stock formula shows a
+   224-line window (video lines 24 to 248) of the display the game declares. On top of it, new code in the text
+   segment extension reads the GPU packet buffer for the game's draw area (`GP0 E3/E4`, never decoded on the CPU side)
+   and crops the picture to it, so Castlevania: Symphony of the Night, which draws only lines 20 to 226 of its 240,
+   loses its black band. Half of the extra zoom goes to the width, so the distortion is shared (about 4% each way
+   for that game). The window grows at once and shrinks only after 24 display commands in a row ask for the same smaller
+   one, and stays as it is when a frame has no usable area, so scenes that alternate areas (the game's intro) do
+   not make the picture jump. PAL, 480i and games without a usable draw area keep the stock behavior. The width is the
+   emulator's own (an earlier version widened it, which was not requested, and it was reverted).
 3. **A PS1 memory card in slot 2 moves to slot 1 when slot 1 has no PS1 card.** The emulator receives the cards as
    `argv[1]` (slot 1) and `argv[2]` (slot 2) into `xMcInsert`. A hook at `0xb3b90` jumps to new code placed in a 4 KB
    extension of the text segment (`0x1a9380`). A card counts as PS1 when `/dev_hdd0/savedata/vmc/<name>.VM1` can be
@@ -34,7 +29,7 @@ PAL is not changed and not validated.
 
 ## Known limitations
 
-- **Castlevania: Symphony of the Night keeps a thin black band at the top.** Static analysis of the draw path
+- **(Fixed in v2.08, was open until v2.07) Castlevania: Symphony of the Night kept a thin black band at the top.** Static analysis of the draw path
   (`0x1152a0` and `0x115c40`, shared by every game) shows the quad is correct: the vertices are
   the `+0x1ac..+0x1b8` floats this patch computes (they overshoot the screen by 7% for that game), and
   the texture coordinates span the whole declared display area (`+0x1bc`/`+0x1c0` = 253 x 238 texels).
