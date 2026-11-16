@@ -31,13 +31,22 @@ PAL is not changed and not validated.
   So the band is not geometry. It is black pixels inside the area the game declares. Removing it needs a
   per-frame scan of the frame content, which is not implemented, because the frame lives in RSX memory
   that only the emulator can read. Games that fill their declared area (Legend of Legaia, Chrono Cross) are fine.
+- **Memory card in slot 1 (not implemented).** The emulator's `main` receives the cards as arguments
+  (`argv[1]` = slot 1, `argv[2]` = slot 2, NULL when absent) and calls `xMcInsert` (`0xb3a..`). When slot 1 comes
+  empty (`0xb4148`) and slot 2 has a card, the card could be moved to slot 1 through the existing path at `0xb4124`.
+  That needs about 10 new instructions (null and empty-string checks on `argv[2]`), and the binary has no safe free
+  space: its zero runs are ELF header fields and data tables, and there are no alignment `nop`s. The in-game
+  "Assign Slots" menu does the same by hand.
+- **Analog with vibration (stock behavior).** The emulator already has a "Vibration Function" setting and handles the
+  analog and rumble pad commands a game sends. A game that never sends them cannot be told apart from a digital-only
+  game, so analog is not forced (see above).
 - PAL, 480i modes and analog-requesting games are untested.
 
 ## Install
 
 ### Option 1: the package (recommended)
 
-1. Copy `PS1NetemuPatch.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it
+1. Copy `ps1_netemu_v2.00.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it
    from the XMB (Game > Package Manager > Install Package Files).
 2. Open **PS1 Emulator Patch**. Press **Cross** (or Circle with the Japanese layout) to install,
    **Triangle** to restore the original, the other face button to exit.
@@ -87,7 +96,7 @@ Needs the [ps3dev](https://github.com/ps3dev/ps3dev) toolchain (`PS3DEV` and `PS
 python ps1_netemu_patch.py ps1_netemu.self installer/payload/ps1_netemu_v2.bin
 cd installer
 make pkg            # PS1NetemuPatch.gnpdrm.pkg
-tools/dist.sh       # ../dist/PS1NetemuPatch.pkg, ps1_netemu_v2.00.self, SHA256SUMS
+tools/dist.sh       # ../dist/ps1_netemu_v2.00.pkg, ps1_netemu_v2.00.self, SHA256SUMS
 tests/run.sh        # install/restore logic, runs on the Mac
 tools/preview.sh    # renders the app screens to PNG on the Mac
 ```

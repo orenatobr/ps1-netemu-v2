@@ -6,6 +6,6 @@ cd "$(dirname "$0")/.."
 out=../dist
 rm -rf "$out"
 mkdir -p "$out"
-cp PS1NetemuPatch.gnpdrm.pkg "$out/PS1NetemuPatch.pkg"
+cp PS1NetemuPatch.gnpdrm.pkg "$out/ps1_netemu_v2.00.pkg"
 cp payload/ps1_netemu_v2.bin "$out/ps1_netemu_v2.00.self"
-( cd "$out" && shasum -a 256 PS1NetemuPatch.pkg ps1_netemu_v2.00.self > SHA256SUMS && cat SHA256SUMS )
+( cd "$out" && shasum -a 256 ps1_netemu_v2.00.pkg ps1_netemu_v2.00.self > SHA256SUMS && cat SHA256SUMS )
