@@ -2,13 +2,12 @@
 
 A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 
-1. **Analog mode switches on by itself (a deliberate change from "analog on at boot", which broke
-   digital-only games; analog-requesting games are still untested) when the game asks for it.** The pad starts digital, like
-   a real DualShock, so digital-only games (Castlevania: Symphony of the Night) keep working.
-   A game that configures the pad (as the original emulator already handled) or that clocks the
-   extra analog bytes gets analog mode right away. The in-game "Switch Analog Mode" still toggles it.
-   A game that only enables analog when you press the ANALOG button needs the menu toggle, as on
-   a real console.
+1. **Analog mode is left as the original emulator has it.** An earlier version forced analog at boot,
+   and a later one switched it on whenever a game clocked extra pad bytes; both broke digital-only
+   games (Castlevania: Symphony of the Night) and the second one stopped the in-game "Switch Analog
+   Mode" from turning it off. A game that configures the pad itself gets analog, as before, and the
+   menu toggle works in both directions. Forcing analog at boot cannot be told apart from a
+   digital-only game, so it is not done.
 2. **Vertical overscan like DuckStation (NTSC), computed every frame from the display the game
    declares, with no per-game value.** The picture is shown in a 224-line window from video
    line 24, so the black bars above and below go away. The picture also fills the whole 4:3

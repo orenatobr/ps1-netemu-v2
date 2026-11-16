@@ -8,8 +8,6 @@ ps1_emu.self but runs ps1_netemu code), then:
     python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
 
 What it does:
-  * analog mode switches on by itself when the game asks for it (it starts digital,
-    like a real DualShock), so digital-only games keep working;
   * the fixed 640/720 horizontal margin is removed, so the picture fills the 4:3 width;
   * vertical "overscan" like DuckStation (NTSC): the picture is shown in a window
     of 224 video lines starting at line 24, cropping what falls outside. Unlike a
@@ -67,9 +65,6 @@ CODE = (
     # horizontal: drop the fixed 640/720 (672/720 at 384 wide) "safe area" margin, fill the 4:3 width
     (0x1158CC, 0xC142881C, 0xC1428820, "x scale numerator = 720 (was 640)"),
     (0x115B48, 0xC1428828, 0xC1428820, "x scale numerator = 720 (was 672, 384 wide)"),
-    # analog: a game that clocks more bytes than the digital pad answers is reading analog axes
-    (0x0D5904, 0x4BFFFC18, 0x4BFFFBE8, "then finish through the existing li r4,0; b 0xd551c"),
-    (0x0D5900, 0x38800000, 0x9169FFDC, "pad analog flag = nonzero (digital pad asked for extra bytes)"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (
