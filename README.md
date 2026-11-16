@@ -30,6 +30,11 @@ The app saves the original to `/dev_hdd0/ps1_netemu_stock.self` first and checks
 hash. It refuses any `ps1_netemu.self` that is not the one build the patch was made for
 (SHA-256 `27d4121e...ebdd5d`), so it never overwrites an unknown file.
 
+The backup is only made when the app finds the original on the console. If the patched file
+was put there by another route first, there is no backup and **Triangle** answers "no backup":
+copy the original (SHA-256 `27d4121e...`) to `/dev_hdd0/ps1_netemu_stock.self` yourself.
+The `.self` is embedded in the package and is not offered as a separate download.
+
 ### Option 2: the file
 
 The release ships only the package. Build the file yourself (see below) and copy `ps1_netemu_v2.00.self` to `/dev_flash/ps1emu/ps1_netemu.self`. The flash must be mounted
