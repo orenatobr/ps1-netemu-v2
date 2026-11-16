@@ -30,7 +30,8 @@ NAME_VA = 0x1BE780  # 32 free bytes in the writable data segment
 O_CREAT_RDWR = 0x202
 FRAME = 0xC10
 SAVE = 0xB00  # r20..r26 are saved at SAVE + 8 * k
-FD, DONE, PATH, SECTOR, CARD, DISCPATH = 0x70, 0x78, 0xC0, 0x200, 0xA00, 0xB80  # DISCPATH: 0x80 bytes
+FD, DONE, PATH, SECTOR, CARD, DISCPATH, LASTBUF = 0x70, 0x78, 0xC0, 0x200, 0xA00, 0xB80, 0xA80  # 0x80 bytes each
+LAST_GAME = b"/dev_hdd0/tmp/wmtmp/last_game.txt\0"  # webMAN writes the path of the game it just launched here
 
 
 
@@ -42,7 +43,26 @@ def program() -> list[tuple]:
     ]
     p += [("std", f"r{20 + k}", SAVE + 8 * k, "r1") for k in range(7)]
     p += [
-        ("lwz", "r25", PATH_TOC, "r2"), ("lbz", "r0", 0, "r25"), ("cmpwi", "r0", 0), ("beq", "fail"),
+        ("lwz", "r25", PATH_TOC, "r2"), ("lbz", "r0", 0, "r25"), ("cmpwi", "r0", 0), ("bne", "havepath"),
+        # the emulator was started without a path (webMAN boots "from disc"): take it from webMAN's record
+        ("bl", "getpc"), ("b", "afterstr"),
+        *[("word", int.from_bytes(s[i:i + 4], "big")) for s in [LAST_GAME.ljust(-(-len(LAST_GAME) // 4) * 4, b"\0")]
+          for i in range(0, len(s), 4)],
+        ("label", "afterstr"),
+        ("addi", "r3", "r3", 4), ("li", "r4", 0), ("addi", "r5", "r1", FD), ("li", "r6", 0), ("li", "r7", 0),
+        ("bl", OPEN), ("cmpwi", "r3", 0), ("bne", "fail"),
+        ("lwz", "r20", FD, "r1"),
+        ("mr", "r3", "r20"), ("addi", "r4", "r1", LASTBUF), ("li", "r5", 0x7E), ("addi", "r6", "r1", DONE),
+        ("bl", READ), ("cmpwi", "r3", 0), ("bne", "closefail"),
+        ("mr", "r3", "r20"), ("bl", CLOSE),
+        ("ld", "r9", DONE, "r1"), ("addi", "r25", "r1", LASTBUF),
+        ("label", "trim"),  # drop trailing spaces and line ends
+        ("cmpwi", "r9", 0), ("beq", "trimmed"), ("add", "r10", "r25", "r9"), ("lbz", "r11", -1, "r10"),
+        ("cmpwi", "r11", 0x20), ("bgt", "trimmed"), ("addi", "r9", "r9", -1), ("b", "trim"),
+        ("label", "trimmed"),
+        ("add", "r10", "r25", "r9"), ("li", "r11", 0), ("stb", "r11", 0, "r10"),
+        ("lbz", "r0", 0, "r25"), ("cmpwi", "r0", 0), ("beq", "fail"),
+        ("label", "havepath"),
         # a later disc of a multi-disc game ("(Disc 2)" and up) uses the serial of "(Disc 1)", so every disc
         # shares one card; the path is copied (the emulator's own buffer is left alone) and the digit changed
         ("addi", "r26", "r1", DISCPATH), ("li", "r9", 0),
@@ -178,6 +198,8 @@ def program() -> list[tuple]:
     p += [("ld", f"r{20 + k}", SAVE + 8 * k, "r1") for k in range(7)]
     p += [("addi", "r1", "r1", FRAME), ("ld", "r0", 0x10, "r1"), ("mtlr", "r0"), ("blr",)]
     p += [  # hdr: is there an ISO9660 volume descriptor at sector 16 for sector size r21 and header r22?
+        ("label", "getpc"),
+        ("mflr", "r3"), ("blr",),
         ("label", "hdr"),
         ("mflr", "r0"), ("std", "r0", 0x10, "r1"), ("stdu", "r1", -0x40, "r1"),
         ("mr", "r3", "r20"), ("mulli", "r4", "r21", 16), ("add", "r4", "r4", "r22"),

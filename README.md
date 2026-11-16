@@ -23,7 +23,8 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    emulator's own (an earlier version widened it, which was not requested, and it was reverted).
 3. **One memory card per game, named after the game's serial, in slot 1.** A hook at `0xb3b90` (inside `xMcInsert`)
    first calls `percard` (`cave_percard.py`), which opens the disc image whose path the emulator keeps in a global
-   buffer (copied from `argv[5]`), finds the ISO9660 volume descriptor in any of three layouts (raw 2352-byte
+   buffer (copied from `argv[5]`; webMAN starts the emulator without it, so the path is then read from webMAN's own
+   record of the game it just launched, `/dev_hdd0/tmp/wmtmp/last_game.txt`), finds the ISO9660 volume descriptor in any of three layouts (raw 2352-byte
    sectors with a 24 or 16 byte header, or 2048-byte sectors), reads `SYSTEM.CNF`, takes the executable name after
    `cdrom:` (`SLUS_006.62;1`) and turns it into the serial `SLUS-00662` (underscore to hyphen, dot dropped, upper
    case). It opens `/dev_hdd0/savedata/vmc/SLUS-00662.VM1`; if the file does not exist it writes a blank formatted
@@ -39,7 +40,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    Vagrant Story and Chrono Cross are in the tests). Without that `(Disc 1)` file the disc's own serial is used, and
    other disc naming (`CD2`, `Disc2`) gets one card per disc. The earlier rule (a PS1 card in slot 2 moves to slot 1
    when slot 1 has none) stays as the fallback. Saves kept in the old shared `PS1.VM1` stay there: assign it to slot 2
-   in the emulator menu to copy them into a per-game card. 85 tests run the real emulator code in a PowerPC
+   in the emulator menu to copy them into a per-game card. 91 tests run the real emulator code in a PowerPC
    interpreter with a simulated file system and synthetic discs; it has not run on a console yet.
 
 ## Known limitations

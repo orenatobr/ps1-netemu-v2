@@ -353,7 +353,8 @@ def test_no_ps1_card_in_slot_2_means_stock_behavior(cave_elf, slot2):
 
 def test_every_probe_closes_the_file_it_opened(cave_elf):
     _cpu, _end, _s1, _s2, log = _slots(cave_elf, "Other", "Game", CARD)
-    assert [k for k, _ in log].count("open") == [k for k, _ in log].count("close") == 2
+    opened = [p for k, p in log if k == "open" and p in CARD]  # attempts at files that do not exist need no close
+    assert len(opened) == [k for k, _ in log].count("close") == 2
 
 
 # ---- content-aware overscan cave --------------------------------------------------------------
@@ -599,6 +600,9 @@ class Fs:
         return base
 
 
+LAST_GAME = "/dev_hdd0/tmp/wmtmp/last_game.txt"
+
+
 def _hook(elf, fs, disc_path="/dev_hdd0/PSXISO/Game.bin", slot1=None, slot2=None):
     cpu = Cpu(elf)
     cpu.mocks = fs.mocks()
@@ -741,3 +745,25 @@ def test_any_multi_disc_game_shares_one_card_not_just_one_title(cave_elf, title,
     expected = serials[1].replace("_", "-").replace(".", "")
     assert cpu.cstr(C.NAME_VA) == expected and not fs.fds
     assert sum(1 for p in fs.files if p.endswith(".VM1")) == 1  # one card for the whole set
+
+
+@pytest.mark.parametrize("tail", [b"", b"\n", b"\r\n", b"  \n"])
+def test_without_a_path_the_game_comes_from_webmans_record(cave_elf, tail):
+    path = "/dev_hdd0/PSXISO/Chrono Cross (USA, Canada) (Disc 2).bin"
+    files = {LAST_GAME: path.encode() + tail}
+    files.update(_chrono([1, 2]))
+    fs = Fs(files)
+    cpu, end = _hook(cave_elf, fs, disc_path="")  # the emulator's own path buffer is empty, as under webMAN
+    assert cpu.cstr(C.NAME_VA) == "SLUS-01041" and cpu.r[30] == C.NAME_VA and not fs.fds
+    assert (CARD_DIR + "SLUS-01041.VM1") in fs.files and end == M.STOCK_RESUME
+
+
+def test_without_a_path_and_without_webmans_record_nothing_changes(cave_elf):
+    cpu, end = _hook(cave_elf, Fs({}), disc_path="", slot1="Other")
+    assert end == M.STOCK_RESUME and cpu.r[28] == 0x11111111 and cpu.r[30] != C.NAME_VA
+
+
+def test_an_empty_webman_record_changes_nothing(cave_elf):
+    fs = Fs({LAST_GAME: b"\n"})
+    cpu, _end = _hook(cave_elf, fs, disc_path="", slot1="Other")
+    assert cpu.r[30] != C.NAME_VA and not fs.fds
