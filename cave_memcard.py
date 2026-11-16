@@ -5,7 +5,8 @@ argv[2] (slot 2, in r27, NULL when absent). The hook at 0xb3b90 jumps here. A ca
 PS1 card when `/dev_hdd0/savedata/vmc/<name>.VM1` can be opened (a name that already ends in ".VM1"
 is used as is). If slot 2 holds a PS1 card and slot 1 is empty or holds something else (a PS2 `.VM2`
 card, a missing file), slot 2's card becomes slot 1's through the emulator's own path at 0xb4124,
-which inserts r30 into slot 1 and clears slot 2. Every other case falls back to the stock code.
+which inserts r30 into slot 1 and clears slot 2. A per-game card is also registered with the
+system like the Assign Slots menu does (cellSysutilGameDataAssignVmc(0, name)). Every other case falls back to the stock code.
 
 Before that, `percard` (cave_percard.py) gives every game its own card in slot 1, named after the game's
 serial, created when missing. The functions called are the emulator's own: strlen 0xa318c, sprintf 0xa5420, open 0x15532c,
@@ -20,6 +21,7 @@ from ppcasm import assemble
 HOOK_VA, HOOK_STOCK = 0xB3B90, 0x2F9B0000  # cmpwi cr7,r27,0
 STOCK_RESUME, MOVE_TARGET = 0xB3B94, 0xB4124
 STRLEN, SPRINTF, FSOPEN, FSCLOSE = 0xA318C, 0xA5420, 0x15532C, 0x14F80C
+ASSIGN_VMC = 0x15EA0C  # import stub of cellSysutilGameDataAssignVmc(slot, name), as the Assign Slots menu calls it
 TOC_FMT = -0x7B04
 RAW_FMT = b"/dev_hdd0/savedata/vmc/%s\0"
 EXISTS_FRAME, MAIN_FRAME = 0x520, 0x40
@@ -32,6 +34,8 @@ def program(fmt_va: int) -> list[tuple]:
         # one card per game: when percard finds the serial, its card becomes slot 1
         ("bl", "percard"), ("cmpwi", "r3", 0), ("beq", "noper"),
         ("lis", "r30", (NAME_VA >> 16) & 0xFFFF), ("ori", "r30", "r30", NAME_VA & 0xFFFF), ("mr", "r28", "r30"),
+        # what the Assign Slots menu also does: register the card with the system as slot 1 (index 0)
+        ("li", "r3", 0), ("mr", "r4", "r30"), ("bl", ASSIGN_VMC), ("ld", "r2", 0x28, "r1"),
         ("label", "noper"),
         ("cmpwi", "r27", 0), ("beq", "stock"),
         ("clrldi", "r3", "r27", 32), ("lbz", "r0", 0, "r3"),

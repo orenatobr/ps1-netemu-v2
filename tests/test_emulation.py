@@ -595,8 +595,13 @@ class Fs:
             self.fds.pop(c.r[3] & M32)
             c.r[3] = 0
 
+        def assign(c):  # the import stub saves the caller's TOC pointer at 0x28(r1), as the real one does
+            self.log.append(("assign", c.r[3], c.cstr(c.r[4]) if c.r[4] else None))
+            c.wr(c.r[1] + 0x28, 8, c.r[2])
+            c.r[3] = 0
+
         base = _mocks(set(), [])
-        base.update({C.OPEN: op, C.LSEEK: seek, C.READ: read, C.WRITE: write, C.CLOSE: close})
+        base.update({C.OPEN: op, C.LSEEK: seek, C.READ: read, C.WRITE: write, C.CLOSE: close, M.ASSIGN_VMC: assign})
         return base
 
 
@@ -796,3 +801,16 @@ def test_the_motors_get_what_the_game_commands_even_if_the_stock_flag_blocks(elf
     assert _motors(stock, small, large, blocked=1) == (0, 0)  # the stock code sends nothing while blocked
     assert _motors(patched, small, large, blocked=1) == (small, large)
     assert _motors(patched, small, large, blocked=0) == (small, large)
+
+
+def test_the_per_game_card_is_registered_as_slot_1_like_the_assign_slots_menu_does(cave_elf):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24))})
+    cpu, _ = _hook(cave_elf, fs)
+    assert [e for e in fs.log if e[0] == "assign"] == [("assign", 0, "SLUS-00662")]
+    assert cpu.r[2] == TOC  # the TOC pointer survives the system call
+
+
+def test_no_system_registration_when_there_is_no_per_game_card(cave_elf):
+    fs = Fs({}, fail_open=set())
+    _hook(cave_elf, fs, disc_path="", slot1="Other")
+    assert not [e for e in fs.log if e[0] == "assign"]
