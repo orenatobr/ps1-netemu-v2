@@ -1,83 +1,48 @@
 # ps1_netemu v2.00
 
-Patched build of the PS3 PS1 emulator (`ps1_netemu.self`) with two changes:
+A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 
-1. **Vertical overscan like DuckStation** (live patcher, NTSC). The picture is placed in
-   a fixed window of video lines 24..248 instead of fitting the display range each
-   game declares, so the black bars above and below are gone. The horizontal extent is
-   untouched: the image stays 4:3 (pillarboxed on a 16:9 TV), it is not widened.
-2. **Analog mode on by default.** Every pad starts as a DualShock in analog
-   mode. "Switch Analog Mode" in the in-game menu still toggles it, and games
-   that send their own pad configuration still override it.
+1. **Analog mode on at boot** for every pad. The in-game "Switch Analog Mode" still toggles it,
+   and games that send their own pad configuration still win.
+2. **Vertical overscan like DuckStation (NTSC).** The picture is shown in a 224-line window from
+   video line 24, so the black bars above and below go away. The width is untouched: the image
+   stays 4:3 and is not widened to 16:9. If a game starts its display after line 24, the window
+   is anchored to the game's own start, so no bar is left at the top.
 
-The output is an unsigned SELF (fself), so it needs custom firmware.
+Tested on a CFW console with webMAN MOD 1.47.48, Legend of Legaia (USA), NTSC, using the
+webMAN netemu option (the process is named `ps1_emu.self` but runs `ps1_netemu` code).
+PAL is not changed and not validated.
 
 ## Install
 
-Back up the stock file first, then copy the new one under the original name:
+### Option 1: the package (recommended)
 
-```
-/dev_flash/ps1emu/ps1_netemu.self   <-  ps1_netemu_v2.00.self (renamed)
-```
+1. Copy `PS1NetemuPatch.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it
+   from the XMB (Game > Package Manager > Install Package Files).
+2. Open **PS1 Emulator Patch**. Press **Cross** (or Circle with the Japanese layout) to install,
+   **Triangle** to restore the original, the other face button to exit.
 
-**Status: the `.self` does not work on hardware.** Even an unpatched fself repack
-shows a black screen, and a minimal header fails with `80010001`: the console does
-not give an unsigned SELF the same privileges as the signed original. Use the
-live patcher below instead; it leaves the stock file untouched.
+The app saves the original to `/dev_hdd0/ps1_netemu_stock.self` first and checks every write by
+hash. It refuses any `ps1_netemu.self` that is not the one build the patch was made for
+(SHA-256 `27d4121e...ebdd5d`), so it never overwrites an unknown file.
 
-## Live patch (recommended)
+### Option 2: the file
 
-With webMAN MOD (PS3MAPI), start a PS1 game that uses `ps1_netemu` (note: with the
-webMAN netemu option the process is named `ps1_emu.self`), then:
+Copy `ps1_netemu_v2.00.self` to `/dev_flash/ps1emu/ps1_netemu.self`. The flash must be mounted
+writable (webMAN: open `http://<ps3-ip>/dev_blind`) and webMAN's FTP cannot rename over an
+existing file: delete the old one first. Keep a copy of the original.
 
-```
-python ps3mapi_patch.py 192.168.1.85            # apply
-python ps3mapi_patch.py 192.168.1.85 --revert   # restore
-python ps3mapi_patch.py 192.168.1.85 --watch    # stay running and patch every game you start
-```
+## How the `.self` is made
 
-The overscan is adaptive, with no per-game value: the picture is shown in a 224-line
-window starting at video line 24 (DuckStation's NTSC overscan). If a game starts its
-display before line 24 the extra lines are cropped, like DuckStation. If it starts
-after line 24 (Legend of Legaia: line 28) the window is anchored to the game's own
-start, so no black bar is left at the top; the overflow at the bottom is cropped.
+The stock SELF container is kept: header, offsets and sizes do not move. Each segment is
+decrypted with the public APP key for revision 0x1C, patched, recompressed to the **same stored
+size** (zlib padded with empty blocks) and encrypted again. The section HMAC-SHA1s inside the
+metadata and the ELF SHA-1 in the control info are recomputed. The ECDSA signature stays as it
+was: this console does not check it, but it does check the hashes (it rejects a file whose
+hashes are stale with error `80010017`).
 
-It reads each patch site first and refuses to write unless the bytes are the stock
-ps1_netemu words. Nothing is written to disk; closing the game undoes it.
-The analog flag is written directly for the 8 pads because pad init already ran.
-
-## What changed (5 instructions)
-
-All addresses are virtual addresses in the decrypted ELF.
-
-| VA | Original | New | Purpose |
-|----|----------|-----|---------|
-| `0xd3080` | `clrlwi r0,r0,31` | `li r0,1` | pad reset: analog flag = 1 |
-| `0xd3288` | `clrlwi r0,r0,31` | `li r0,1` | pad slot reset loop: analog flag = 1 |
-| `0xd4eac` | `clrlwi r0,r0,31` | `li r0,1` | pad init loop: analog flag = 1 |
-| `0x115824` | `fsubs f12,f0,f13` | `fsubs f12,f0,f0` | quad top offset = 0 |
-| `0x115874` | `fadds f13,f12,f1` | `fmr f13,f10` | quad bottom = full frame height |
-
-### Analog
-
-The per-pad record is 0xd8 bytes. The word at `+0x9c` selects the poll
-response ID (`0x73` analog, `0x41` digital). Three places seeded it with
-`config & 1`; they now seed it with 1.
-
-### Stretch
-
-The display command handler (function `0x113f0c`, geometry at `0x115780`)
-places the picture using the GPU's vertical display range (Y1 to Y2) against a
-nominal 240 (NTSC) or 288 (PAL) lines. A game that shows 224 or 256 lines gets
-bars. The patches force the quad to span the whole frame height. The texture V
-range (`f1`) is not touched, so the same source rows are sampled and only the
-on-screen rectangle grows. Games whose range already equals the nominal height
-look the same as before.
-
-## Rebuild
-
-You need the stock `ps1_netemu.self` (APP, key revision `0x1C`). It is not in
-this repository.
+The 20 changed words are in `ps3mapi_patch.py` (`CODE`, `CONSTANTS`) and `ps1_netemu_patch.py`
+(`ANALOG`). The patcher checks the original bytes at every site and refuses anything else.
 
 ```
 pip install -r requirements-dev.txt
@@ -85,37 +50,47 @@ python ps1_netemu_patch.py ps1_netemu.self ps1_netemu_v2.00.self
 PS1_NETEMU_SELF=ps1_netemu.self python -m pytest -q tests
 ```
 
-The script decrypts the SELF with the public APP key for revision `0x1C`,
-checks the original bytes at each patch site (it refuses to patch anything
-unexpected), then wraps the ELF in an unsigned SELF that reuses the stock app
-info and control info.
+You need the stock `ps1_netemu.self` (APP, key revision 0x1C); it is not in this repository.
 
-## Checksums
+## Build the package
+
+Needs the [ps3dev](https://github.com/ps3dev/ps3dev) toolchain (`PS3DEV` and `PSL1GHT` set).
 
 ```
-27d4121ecf8dddf83fa7f0117a454254bd6626c6f17e3412cdd9e24aa7ebdd5d  ps1_netemu.self (input)
-7b994306ad1a984d729e97a939c7d9ac62f7d5823febb0bf58520777ab7b6507  ps1_netemu_v2.00.self
+python ps1_netemu_patch.py ps1_netemu.self installer/payload/ps1_netemu_v2.bin
+cd installer
+make pkg            # PS1NetemuPatch.gnpdrm.pkg
+tools/dist.sh       # ../dist/PS1NetemuPatch.pkg, ps1_netemu_v2.00.self, SHA256SUMS
+tests/run.sh        # install/restore logic, runs on the Mac
+tools/preview.sh    # renders the app screens to PNG on the Mac
 ```
 
-The binary is Sony's code with five instructions changed. Use it on your own
-console only.
+`installer/` reuses the canvas, fonts and file helpers of
+[HomeTidy](https://github.com/orenatobr/hometidy-ps3) and is licensed GPL-2.0 like it.
 
-## Tested configuration
+## Live patch (no install)
 
-Legend of Legaia (USA), NTSC, PS1 ISO mounted by webMAN MOD 1.47.48 with the netemu option
-(process `ps1_emu.self` running `ps1_netemu` code). Analog mode: confirmed on the TV. Overscan: geometry
-measured in memory; the last top-edge adjustment is not yet confirmed visually. PAL: untouched and
-unsupported. The repository is private, so downloads need the owner's login.
+`ps3mapi_patch.py` writes the same changes into the running emulator through webMAN PS3MAPI.
+Nothing on the console changes and it is undone when the game closes. It checks the stock bytes
+before writing.
 
-## Why there is no working `.self`
+```
+python ps3mapi_patch.py 192.168.1.85            # apply, game running
+python ps3mapi_patch.py 192.168.1.85 --revert   # restore
+python ps3mapi_patch.py 192.168.1.85 --watch    # patch every game you start
+```
 
-Three container strategies were tested on hardware:
+## What did not work
 
 | Approach | Result |
 |----------|--------|
-| Unsigned SELF (fself), all original control flags | loads, black screen (even with no patch) |
+| Unsigned SELF (fself), original control flags | loads, black screen (even with no patch) |
 | fself with a minimal header | error `80010001` |
-| Stock SELF container, segments repacked at the same size | error `80010017` (integrity check) |
+| Stock container, segments repacked, hashes left stale | error `80010017` |
+| Stock container, segments repacked, hashes recomputed | works |
 
-The signature covers the section hashes, so a patched retail SELF cannot be re-signed
-without Sony's private key. Use `ps3mapi_patch.py --watch` instead.
+## Notes
+
+- The patched binary is Sony's code with 20 words changed. Use it on your own console only; this
+  repository is private for that reason, so downloads need the owner's login.
+- Restore: the package app (Triangle), or copy the original back the same way you installed.

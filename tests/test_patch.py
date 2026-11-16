@@ -2,6 +2,8 @@
 
 Set PS1_NETEMU_SELF to a stock ps1_netemu.self to also run the real-file checks.
 """
+import hashlib
+import hmac
 import os
 import random
 import struct
@@ -61,15 +63,21 @@ def test_deflate_to_size_refuses_when_it_cannot_fit():
 
 
 @pytest.mark.skipif("PS1_NETEMU_SELF" not in os.environ, reason="stock SELF not provided")
-def test_real_file_repack_keeps_layout_and_only_patched_words_differ():
+def test_real_file_repack_keeps_layout_and_recomputes_integrity():
     stock = Path(os.environ["PS1_NETEMU_SELF"]).read_bytes()
-    elf = P.unpack(stock)
-    patched = P.apply_patches(elf)
+    patched = P.apply_patches(P.unpack(stock))
     out = P.repack(stock, patched)
     assert len(out) == len(stock)
-    sections, _, _ = P.parse_sections(stock)
-    inside = bytearray(len(stock))
+    sections, _, _, meta = P.parse_all(out)
+    changeable = bytearray(len(stock))  # segments, the encrypted hash table and the ELF digest
     for s in sections:
-        inside[s.off:s.off + s.size] = b"\x01" * s.size
-    assert all(stock[i] == out[i] for i in range(len(stock)) if not inside[i])  # container untouched
+        changeable[s.off:s.off + s.size] = b"\x01" * s.size
+    changeable[meta.file_off:meta.file_off + len(meta.blob)] = b"\x01" * len(meta.blob)
+    changeable[P.ELF_DIGEST_OFF:P.ELF_DIGEST_OFF + 20] = b"\x01" * 20
+    assert all(stock[i] == out[i] for i in range(len(stock)) if not changeable[i])
     assert P.unpack(out) == patched  # decrypts back to exactly the patched ELF
+    assert hashlib.sha1(patched).digest() == out[P.ELF_DIGEST_OFF:P.ELF_DIGEST_OFF + 20]
+    for s in sections:
+        raw = out[s.off:s.off + s.size]
+        data = P._ctr(s.key, s.iv, raw) if s.encrypted else raw
+        assert hmac.new(s.hmac_key, data, hashlib.sha1).digest() == meta.blob[s.hash_pos:s.hash_pos + 20]
