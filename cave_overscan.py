@@ -8,6 +8,9 @@ keeps the tallest (the lowest top on a tie) and treats its rows as the picture. 
 with the overscan window the stock formula already applied, and y1/y2 are rescaled so the result fills the
 screen. Half of the extra zoom goes to x, so the distortion is shared between both axes.
 
+The window is remembered between calls (five words at STATE_VA): it grows at once and shrinks only after
+HOLD consecutive display commands asked for the same smaller one; with no pair the window in use stays.
+
 Nothing changes when the declared height is not 200..256 lines, no pair is found, the top is not in the
 upper half, the bottom is not in the lower half, or the quad is degenerate. Everything it touches is
 saved and restored.
@@ -25,6 +28,8 @@ FRAME = 0x140
 SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
 CONSTS = (-1.0, 1.0, 2.0, 0.5)  # data offsets 0, 4, 8, 12
+STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
+HOLD = 24  # display commands in a row before the window shrinks
 
 
 def program(data_va: int) -> list[tuple]:
@@ -59,16 +64,37 @@ def program(data_va: int) -> list[tuple]:
         ("li", "r7", -1),
         ("label", "adv"),
         ("addi", "r3", "r3", 4), ("cmpw", "r3", "r4"), ("blt", "loop"),
-        # r10 = top row, r9 = height, r11 = H; the window is [a, b)
-        ("cmpwi", "r9", 0), ("beq", "done"),
+        # r10 = top row, r9 = height (0 when no pair was found), r11 = H
+        ("lis", "r12", (STATE_VA >> 16) & 0xFFFF), ("ori", "r12", "r12", STATE_VA & 0xFFFF),
+        ("lwz", "r5", 0, "r12"), ("lwz", "r6", 4, "r12"),  # the window in use: [a, b)
+        ("cmpwi", "r9", 0), ("beq", "noc"),
         ("rlwinm", "r0", "r11", 31, 1, 31),  # H / 2
-        ("cmpw", "r10", "r0"), ("bge", "done"),
+        ("cmpw", "r10", "r0"), ("bge", "noc"),
         ("add", "r9", "r10", "r9"), ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
         ("label", "b1"),
-        ("cmpw", "r9", "r0"), ("ble", "done"),
+        ("cmpw", "r9", "r0"), ("ble", "noc"),
+        # a usable candidate [r10, r9): it grows the window at once and shrinks it only after HOLD
+        # display commands in a row asked for the same smaller one, so a scene that alternates
+        # areas (or has none for a while) cannot make the picture jump
+        ("cmpwi", "r6", 0), ("bne", "have"), ("li", "r5", 0), ("mr", "r6", "r11"),
+        ("label", "have"),
+        ("subf", "r7", "r10", "r9"), ("subf", "r8", "r5", "r6"), ("cmpw", "r7", "r8"), ("blt", "smaller"),
+        ("mr", "r5", "r10"), ("mr", "r6", "r9"), ("li", "r7", 0), ("b", "keepc"),
+        ("label", "smaller"),
+        ("lwz", "r7", 8, "r12"), ("lwz", "r8", 12, "r12"),
+        ("cmpw", "r7", "r10"), ("bne", "newc"), ("cmpw", "r8", "r9"), ("bne", "newc"),
+        ("lwz", "r7", 16, "r12"), ("addi", "r7", "r7", 1), ("cmpwi", "r7", HOLD), ("blt", "keepc"),
+        ("mr", "r5", "r10"), ("mr", "r6", "r9"), ("li", "r7", 0), ("b", "keepc"),
+        ("label", "newc"),
+        ("stw", "r10", 8, "r12"), ("stw", "r9", 12, "r12"), ("li", "r7", 1),
+        ("label", "keepc"),
+        ("stw", "r7", 16, "r12"), ("stw", "r5", 0, "r12"), ("stw", "r6", 4, "r12"), ("b", "usewin"),
+        ("label", "noc"),
+        ("cmpwi", "r6", 0), ("beq", "done"),  # nothing applied yet: leave the picture alone
+        ("label", "usewin"),
         # float part
-        ("std", "r10", 0x70, "r1"), ("lfd", "f0", 0x70, "r1"), ("fcfid", "f0", "f0"), ("frsp", "f0", "f0"),
-        ("std", "r9", 0x70, "r1"), ("lfd", "f1", 0x70, "r1"), ("fcfid", "f1", "f1"), ("frsp", "f1", "f1"),
+        ("std", "r5", 0x70, "r1"), ("lfd", "f0", 0x70, "r1"), ("fcfid", "f0", "f0"), ("frsp", "f0", "f0"),
+        ("std", "r6", 0x70, "r1"), ("lfd", "f1", 0x70, "r1"), ("fcfid", "f1", "f1"), ("frsp", "f1", "f1"),
         ("std", "r11", 0x70, "r1"), ("lfd", "f2", 0x70, "r1"), ("fcfid", "f2", "f2"), ("frsp", "f2", "f2"),
         ("fdivs", "f0", "f0", "f2"), ("fdivs", "f1", "f1", "f2"),  # a/H, b/H
         ("lis", "r12", hi), ("ori", "r12", "r12", lo),

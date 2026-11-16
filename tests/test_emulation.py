@@ -361,27 +361,39 @@ def _reference(q, a, b, h):
     return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
 
 
+def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None):
+    """Run the hook once per entry of `frames` (each a list of packet-buffer words), sharing memory so the
+    remembered window carries over, and return the quad after each call."""
+    mem = {} if mem is None else mem
+    out = []
+    for words in frames:
+        cpu = Cpu(elf)
+        cpu.mem = mem
+        cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
+        cpu.wr(STATE + 0x1C, 4, y1d)
+        cpu.wr(STATE + 0x20, 4, y2d)
+        cpu.wr(TOC - 0x77F8, 4, OBJ)
+        for k in range(0x17A0 // 4):  # the buffer holds only this frame's words
+            cpu.wr(OBJ + 0x60 + 4 * k, 4, words[k] if k < len(words) else 0)
+        cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = (
+            struct.unpack(">f", struct.pack(">f", v))[0] for v in (q["x1"], q["x2"], q["y1"], q["y2"]))
+        sent_f = {i: 100.5 + i for i in (0, 1, 2, 3, 8, 9, 10, 13)}
+        sent_r = {i: 0x5000 + i for i in (0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)}
+        for i, v in sent_f.items():
+            cpu.f[i] = v
+        for i, v in sent_r.items():
+            cpu.r[i] = v
+        end = cpu.run(O.HOOK_VA, {O.RESUME})
+        assert end == O.RESUME and cpu.r[1] == STACK
+        assert all(cpu.f[i] == v for i, v in sent_f.items()) and all(cpu.r[i] == v for i, v in sent_r.items())
+        assert cpu.rd(OUT + 0x1AC, 4) == struct.unpack(">I", struct.pack(">f", cpu.f[6]))[0]  # displaced store ran
+        out.append({"x1": cpu.f[6], "x2": cpu.f[5], "y1": cpu.f[7], "y2": cpu.f[4]})
+    return out
+
+
 def _overscan(elf, words, q=SOTN, y1d=16, y2d=256):
-    cpu = Cpu(elf)
-    cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
-    cpu.wr(STATE + 0x1C, 4, y1d)
-    cpu.wr(STATE + 0x20, 4, y2d)
-    cpu.wr(TOC - 0x77F8, 4, OBJ)
-    for i, w in enumerate(words):
-        cpu.wr(OBJ + 0x60 + 4 * i, 4, w)
-    cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = q["x1"], q["x2"], q["y1"], q["y2"]
-    cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = (struct.unpack(">f", struct.pack(">f", v))[0] for v in (q["x1"], q["x2"], q["y1"], q["y2"]))
-    sent_f = {i: 100.5 + i for i in (0, 1, 2, 3, 8, 9, 10, 13)}
-    sent_r = {i: 0x5000 + i for i in (0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)}
-    for i, v in sent_f.items():
-        cpu.f[i] = v
-    for i, v in sent_r.items():
-        cpu.r[i] = v
-    end = cpu.run(O.HOOK_VA, {O.RESUME})
-    assert end == O.RESUME and cpu.r[1] == STACK
-    assert all(cpu.f[i] == v for i, v in sent_f.items()) and all(cpu.r[i] == v for i, v in sent_r.items())
-    assert cpu.rd(OUT + 0x1AC, 4) == struct.unpack(">I", struct.pack(">f", cpu.f[6]))[0]  # the displaced store ran
-    return {"x1": cpu.f[6], "x2": cpu.f[5], "y1": cpu.f[7], "y2": cpu.f[4]}
+    """The quad after the window has settled (O.HOLD identical frames)."""
+    return _frames(elf, [words] * O.HOLD, q=q, y1d=y1d, y2d=y2d)[-1]
 
 
 def _same(a, b, tol=1e-4):
@@ -426,3 +438,36 @@ def test_a_degenerate_quad_is_left_alone(cave_elf):
 def test_the_stock_overscan_window_is_kept_when_the_game_draws_more(cave_elf):
     got = _overscan(cave_elf, [_e3(0, 2), _e4(255, 237)])  # rows 2..238: wider than the 8..232 window
     assert _same(got, SOTN)
+
+
+def test_the_window_shrinks_only_after_hold_frames_in_a_row(cave_elf):
+    words = [_e3(0, 20), _e4(255, 226)]
+    out = _frames(cave_elf, [words] * (O.HOLD + 3))
+    assert all(_same(q, SOTN) for q in out[:O.HOLD - 1])  # still the stock picture
+    assert all(_same(q, _reference(SOTN, 20, 227, 240)) for q in out[O.HOLD - 1:])  # then it stays cropped
+
+
+def test_a_scene_that_alternates_areas_never_flickers(cave_elf):
+    full, game = [_e3(0, 0), _e4(255, 239)], [_e3(0, 20), _e4(255, 226)]
+    out = _frames(cave_elf, [full, game] * 40)
+    assert all(_same(q, SOTN) for q in out)
+
+
+def test_the_window_in_use_stays_when_a_frame_has_no_pair(cave_elf):
+    game = [_e3(0, 20), _e4(255, 226)]
+    out = _frames(cave_elf, [game] * O.HOLD + [[], [_e3(0, 0), _e4(1023, 1023)], []] + [game] * 2)
+    cropped = _reference(SOTN, 20, 227, 240)
+    assert all(_same(q, cropped) for q in out[O.HOLD - 1:])
+
+
+def test_a_larger_area_restores_the_picture_at_once(cave_elf):
+    game, full = [_e3(0, 20), _e4(255, 226)], [_e3(0, 0), _e4(255, 239)]
+    out = _frames(cave_elf, [game] * O.HOLD + [full])
+    assert _same(out[O.HOLD - 1], _reference(SOTN, 20, 227, 240)) and _same(out[-1], SOTN)
+
+
+def test_a_different_smaller_area_needs_its_own_hold(cave_elf):
+    a, b = [_e3(0, 20), _e4(255, 226)], [_e3(0, 40), _e4(255, 200)]
+    out = _frames(cave_elf, [a] * O.HOLD + [b] * (O.HOLD - 1) + [b])
+    assert _same(out[O.HOLD + O.HOLD - 2], _reference(SOTN, 20, 227, 240))  # one short: still window a
+    assert _same(out[-1], _reference(SOTN, 40, 201, 240))
