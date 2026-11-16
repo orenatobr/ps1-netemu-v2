@@ -1,10 +1,12 @@
 """Tests for ps1_netemu_patch using a synthetic ELF (no Sony binary needed).
 
-Set PS1_NETEMU_SELF to a stock ps1_netemu.self to also run the real-file check.
+Set PS1_NETEMU_SELF to a stock ps1_netemu.self to also run the real-file checks.
 """
 import os
+import random
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import ps1_netemu_patch as P
 
-LOAD_VA, LOAD_SIZE = 0x10000, 0x110000
+LOAD_VA, LOAD_SIZE = 0x10000, 0x1B0000  # covers every patched address (up to 0x1be754)
 
 
 def synthetic_elf() -> bytes:
@@ -32,7 +34,7 @@ def test_patches_change_only_target_words():
     elf = synthetic_elf()
     out = P.apply_patches(elf)
     diff = [i for i in range(0, len(elf), 4) if elf[i:i + 4] != out[i:i + 4]]
-    assert diff == [0x200 + p.va - LOAD_VA for p in P.PATCHES]
+    assert diff == sorted(0x200 + p.va - LOAD_VA for p in P.PATCHES)
     for p in P.PATCHES:
         assert struct.unpack(">I", out[0x200 + p.va - LOAD_VA:][:4])[0] == p.new
 
@@ -44,41 +46,30 @@ def test_patch_refuses_unexpected_bytes():
         P.apply_patches(bytes(elf))
 
 
-def fake_orig_self() -> bytes:
-    """Header-shaped bytes with a valid flags block and digest block at 0x3a0."""
-    flags = struct.pack(">IIQ", 1, 0x30, 1) + bytes(0x20)
-    digest = struct.pack(">IIQ", 2, 0x40, 0) + bytes(range(0x30))
-    return bytes(0x3A0) + flags + digest
+@pytest.mark.parametrize("delta", [0, 5, 100, 1234])
+def test_deflate_to_size_is_exact_and_lossless(delta):
+    rng = random.Random(7)
+    data = bytes(rng.choice(b"abcdefgh") for _ in range(50_000))
+    size = len(zlib.compress(data, 6)) + delta
+    out = P.deflate_to_size(data, size)
+    assert len(out) == size and zlib.decompress(out) == data
 
 
-def test_fself_roundtrip():
-    elf = P.apply_patches(synthetic_elf())
-    out = P.build_fself(elf, fake_orig_self())
-    magic, _v, flags, typ, _meta, hdr_len, data_len = struct.unpack(">4sIHHIQQ", out[:32])
-    assert (magic, flags, typ) == (b"SCE\0", 0x8000, 1)
-    assert out[hdr_len:] == elf and data_len == len(elf) and hdr_len % 0x80 == 0
-    seg_off = struct.unpack(">9Q", out[0x20:0x68])[5]
-    off, size, comp, _, _, enc = struct.unpack(">QQ4I", out[seg_off:seg_off + 0x20])
-    assert (off, size, comp, enc) == (0x200 + hdr_len, LOAD_SIZE, 1, 2)
-
-
-def test_fself_minimal_header_roundtrip():
-    orig = fake_orig_self()
-    flags, digest = orig[0x3A0:0x3D0], orig[0x3D0:0x410]
-    out = P.build_fself(P.apply_patches(synthetic_elf()), orig)
-    ext = struct.unpack(">9Q", out[0x20:0x68])
-    ctl_off, ctl_size = ext[7], ext[8]
-    assert out[ctl_off:ctl_off + ctl_size] == digest  # only the digest block survives
-    assert ext[6] == 0  # no SCE version block
-    assert P.control_blocks(flags + digest).keys() == {1, 2}
+def test_deflate_to_size_refuses_when_it_cannot_fit():
+    with pytest.raises(ValueError, match="cannot fit"):
+        P.deflate_to_size(os.urandom(5000), 100)
 
 
 @pytest.mark.skipif("PS1_NETEMU_SELF" not in os.environ, reason="stock SELF not provided")
-def test_real_file_only_five_words_differ():
+def test_real_file_repack_keeps_layout_and_only_patched_words_differ():
     stock = Path(os.environ["PS1_NETEMU_SELF"]).read_bytes()
     elf = P.unpack(stock)
-    out = P.build_fself(P.apply_patches(elf), stock)
-    embedded = out[struct.unpack(">Q", out[0x10:0x18])[0]:]
-    assert len(embedded) == len(elf)
-    diff = [i for i in range(0, len(elf), 4) if elf[i:i + 4] != embedded[i:i + 4]]
-    assert len(diff) == len(P.PATCHES)
+    patched = P.apply_patches(elf)
+    out = P.repack(stock, patched)
+    assert len(out) == len(stock)
+    sections, _, _ = P.parse_sections(stock)
+    inside = bytearray(len(stock))
+    for s in sections:
+        inside[s.off:s.off + s.size] = b"\x01" * s.size
+    assert all(stock[i] == out[i] for i in range(len(stock)) if not inside[i])  # container untouched
+    assert P.unpack(out) == patched  # decrypts back to exactly the patched ELF

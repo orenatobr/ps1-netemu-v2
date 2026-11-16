@@ -1,8 +1,9 @@
 """Build ps1_netemu_v2.00.self from a stock ps1_netemu.self.
 
-Pipeline: decrypt the retail SELF (APP, key revision 0x1C, public keys), apply
-the byte patches below (each one checks the original bytes first), then wrap
-the ELF in an unsigned "fake" SELF (fself) for custom firmware.
+The stock SELF container (header, metadata, signature) is kept byte for byte.
+Only the encrypted segment data changes: each segment is decrypted, patched,
+recompressed to the SAME stored size (zlib, padded with empty stored blocks) and
+encrypted again with the original keys, so no offset or size in the metadata moves.
 
 Usage:
     python ps1_netemu_patch.py INPUT.self OUTPUT.self
@@ -18,17 +19,20 @@ from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from ps3mapi_patch import CODE, CONSTANTS
+
 logger = logging.getLogger(__name__)
 
 # APP key for revision 0x1C (public, published by the RPCS3 project).
 APP_ERK = bytes.fromhex("CFF025375BA0079226BE01F4A31F346D79F62CFB643CA910E16CF60BD9092752")
 APP_RIV = bytes.fromhex("FD40664E2EBBA01BF359B0DCDF543DA4")
 EXPECTED_KEY_REVISION = 0x1C
+EMPTY_STORED_BLOCK = b"\x00\x00\x00\xff\xff"  # non-final, zero-length deflate block
 
 
 @dataclass(frozen=True)
 class Patch:
-    """One 32-bit instruction replacement at a virtual address."""
+    """One 32-bit word replacement at a virtual address."""
 
     va: int
     old: int
@@ -36,25 +40,17 @@ class Patch:
     what: str
 
 
-# PowerPC encodings:
-#   li r0,1             = 0x38000001
-#   fsubs f12,f0,f0     = 0xED800028   (was fsubs f12,f0,f13)
-#   fmr   f13,f10       = 0xFDA05090   (was fadds f13,f12,f1)
-CLRLWI_R0_R0_31 = 0x540007FE
-LI_R0_1 = 0x38000001
-
+# Analog on at boot: the three places that seed the per-pad analog flag with
+# `config & 1` (clrlwi r0,r0,31) now seed it with 1 (li r0,1).
+ANALOG = tuple(
+    Patch(va, 0x540007FE, 0x38000001, "pad analog flag seeded with 1")
+    for va in (0x0D3080, 0x0D3288, 0x0D4EAC)
+)
+# Vertical overscan + float constants live in ps3mapi_patch (single source of truth).
 PATCHES = (
-    # Analog mode on by default: the three places that seed the per-pad
-    # analog flag (pad + 0x9c) with `config & 1` now seed it with 1.
-    Patch(0x0D3080, CLRLWI_R0_R0_31, LI_R0_1, "pad reset: analog flag = 1"),
-    Patch(0x0D3288, CLRLWI_R0_R0_31, LI_R0_1, "pad slot reset loop: analog flag = 1"),
-    Patch(0x0D4EAC, CLRLWI_R0_R0_31, LI_R0_1, "pad init loop: analog flag = 1"),
-    # Vertical stretch: display command geometry (function 0x113f0c, label
-    # 0x115820). Y offset of the quad forced to 0 and its bottom edge forced to
-    # the full frame height; texture V range (f1) is untouched, so only the
-    # on-screen quad grows, 4:3 horizontal extent stays as is.
-    Patch(0x115824, 0xED806828, 0xED800028, "quad top offset = 0"),
-    Patch(0x115874, 0xEDAC082A, 0xFDA05090, "quad bottom = full height"),
+    *ANALOG,
+    *(Patch(a, old, new, why) for a, old, new, why in CODE),
+    *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
 )
 
 
@@ -62,40 +58,68 @@ def _ctr(key: bytes, iv: bytes, data: bytes) -> bytes:
     return Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor().update(data)
 
 
-def unpack(self_bytes: bytes) -> bytes:
-    """Decrypt a retail SELF into a flat ELF file (with section headers)."""
-    d = self_bytes
-    magic, _ver, key_rev, hdr_type, meta_off, hdr_len, _dlen = struct.unpack(">4sIHHIQQ", d[:32])
+@dataclass(frozen=True)
+class Section:
+    """A SELF data section: where it lives in the file and how it is stored."""
+
+    off: int
+    size: int
+    phdr_index: int
+    encrypted: bool
+    compressed: bool
+    key: bytes
+    iv: bytes
+
+
+def parse_sections(d: bytes) -> tuple[list[Section], bytes, int]:
+    """Return the segment sections, the program headers and e_phoff of a retail SELF."""
+    magic, _ver, key_rev, hdr_type, meta_off, hdr_len, _ = struct.unpack(">4sIHHIQQ", d[:32])
     if magic != b"SCE\0" or hdr_type != 1:
         raise ValueError("not a SELF")
     if key_rev != EXPECTED_KEY_REVISION:
         raise ValueError(f"unsupported key revision 0x{key_rev:x}")
-    _v, _ai, elf_off, phdr_off, shdr_off, *_ = struct.unpack(">9Q", d[0x20:0x68])
-    ehdr = bytearray(d[elf_off:elf_off + 0x40])
-    e_phoff, e_shoff = struct.unpack(">QQ", ehdr[0x20:0x30])
-    phentsize, phnum, shentsize, shnum = struct.unpack(">HHHH", ehdr[0x36:0x3E])
-
+    _v, _ai, elf_off, phdr_off, *_ = struct.unpack(">9Q", d[0x20:0x68])
+    e_phoff = struct.unpack(">Q", d[elf_off + 0x20:elf_off + 0x28])[0]
+    phentsize, phnum = struct.unpack(">HH", d[elf_off + 0x36:elf_off + 0x3A])
     cbc = Cipher(algorithms.AES(APP_ERK), modes.CBC(APP_RIV)).decryptor()
     info = cbc.update(d[meta_off + 0x20:meta_off + 0x60])
-    meta_key, meta_iv = info[0:16], info[32:48]
-    blob = _ctr(meta_key, meta_iv, d[meta_off + 0x60:hdr_len])
+    blob = _ctr(info[0:16], info[32:48], d[meta_off + 0x60:hdr_len])
     nsec, nkeys = struct.unpack(">II", blob[0x0C:0x14])
     keys = [blob[0x20 + nsec * 0x30 + 16 * i:][:16] for i in range(nkeys)]
-
-    phdrs = d[phdr_off:phdr_off + phnum * phentsize]
-    out = bytearray(ehdr)
-    out += b"\0" * (e_phoff - len(out)) + phdrs
+    sections = []
     for i in range(nsec):
         off, size, typ, idx, _h, _s, enc, kidx, iidx, comp = struct.unpack(
             ">QQ8I", blob[0x20 + i * 0x30:0x20 + (i + 1) * 0x30])
-        if typ != 2:  # 2 = segment data
-            continue
-        data = d[off:off + size]
-        if enc == 3:
-            data = _ctr(keys[kidx], keys[iidx], data)
-        if comp == 2:
+        if typ == 2:  # 2 = segment data
+            sections.append(Section(off, size, idx, enc == 3, comp == 2,
+                                    keys[kidx] if enc == 3 else b"", keys[iidx] if enc == 3 else b""))
+    return sections, d[phdr_off:phdr_off + phnum * phentsize], e_phoff
+
+
+def _phdr(phdrs: bytes, index: int) -> tuple[int, int]:
+    """(p_offset, p_filesz) of program header `index`."""
+    p_offset, = struct.unpack(">Q", phdrs[index * 56 + 8:index * 56 + 16])
+    p_filesz, = struct.unpack(">Q", phdrs[index * 56 + 32:index * 56 + 40])
+    return p_offset, p_filesz
+
+
+def unpack(self_bytes: bytes) -> bytes:
+    """Decrypt a retail SELF into a flat ELF file (with section headers)."""
+    d = self_bytes
+    sections, phdrs, e_phoff = parse_sections(d)
+    _v, _ai, elf_off, _po, shdr_off, *_ = struct.unpack(">9Q", d[0x20:0x68])
+    ehdr = bytearray(d[elf_off:elf_off + 0x40])
+    e_shoff = struct.unpack(">Q", ehdr[0x28:0x30])[0]
+    shentsize, shnum = struct.unpack(">HH", ehdr[0x3A:0x3E])
+    out = bytearray(ehdr)
+    out += b"\0" * (e_phoff - len(out)) + phdrs
+    for sec in sections:
+        data = d[sec.off:sec.off + sec.size]
+        if sec.encrypted:
+            data = _ctr(sec.key, sec.iv, data)
+        if sec.compressed:
             data = zlib.decompress(data)
-        p_offset = struct.unpack(">Q", phdrs[idx * phentsize + 8:idx * phentsize + 16])[0]
+        p_offset, _ = _phdr(phdrs, sec.phdr_index)
         out += b"\0" * (p_offset - len(out))
         out[p_offset:p_offset + len(data)] = data
     if shnum:
@@ -128,64 +152,45 @@ def apply_patches(elf: bytes, patches: tuple[Patch, ...] = PATCHES) -> bytes:
     return bytes(out)
 
 
-def control_blocks(control: bytes) -> dict[int, bytes]:
-    """Split SELF control info into {type: block}; each block starts with (type, size)."""
-    blocks, off = {}, 0
-    while off + 8 <= len(control):
-        typ, size = struct.unpack(">II", control[off:off + 8])
-        if size < 8 or off + size > len(control):
-            raise ValueError(f"bad control block at +0x{off:x}")
-        blocks[typ] = control[off:off + size]
-        off += size
-    return blocks
+def deflate_to_size(data: bytes, size: int) -> bytes:
+    """Compress `data` as a zlib stream of exactly `size` bytes.
 
-
-def build_fself(elf: bytes, orig_self: bytes, minimal: bool = True) -> bytes:
-    """Wrap `elf` in an unsigned SELF, reusing the original app info.
-
-    `minimal` keeps only the digest control block (PSL1GHT layout, no SCE
-    version block); otherwise the original capability flags are copied too.
+    Tries zlib settings until the stream fits and the leftover is a multiple of 5,
+    then pads with empty non-final stored blocks right after the 2-byte zlib header.
     """
-    app_info = orig_self[0x70:0x90]
-    sce_version = b"" if minimal else orig_self[0x390:0x3A0]
-    control = orig_self[0x3A0:0x410]
-    if minimal:
-        control = control_blocks(control)[2]  # digest block only; no capability flags
-    ehdr = elf[:0x40]
-    e_phoff, e_shoff = struct.unpack(">QQ", ehdr[0x20:0x30])
-    phentsize, phnum = struct.unpack(">HH", ehdr[0x36:0x3A])
-    phdrs = elf[e_phoff:e_phoff + phnum * phentsize]
+    for level in (6, 9, 8, 7, 5, 4, 3, 2, 1):
+        for mem in range(8, 0, -1):
+            comp = zlib.compressobj(level, zlib.DEFLATED, 15, mem)
+            stream = comp.compress(data) + comp.flush()
+            pad = size - len(stream)
+            if pad >= 0 and pad % len(EMPTY_STORED_BLOCK) == 0:
+                out = stream[:2] + EMPTY_STORED_BLOCK * (pad // len(EMPTY_STORED_BLOCK)) + stream[2:]
+                if len(out) != size or zlib.decompress(out) != data:
+                    raise AssertionError("padded stream does not round-trip")
+                return out
+    raise ValueError(f"cannot fit a {len(data)} byte segment into {size} compressed bytes")
 
-    app_off, elf_off, phdr_off = 0x70, 0x90, 0x90 + 0x40
-    seg_off = phdr_off + len(phdrs)
-    ver_off = seg_off + 0x20 * phnum
-    ctl_off = ver_off + len(sce_version)
-    end = ctl_off + len(control)
-    data_off = (end + 0x7F) & ~0x7F
 
-    segs = b""
-    for i in range(phnum):
-        p_type, _f, p_off, *_r, p_filesz, _ms, _al = struct.unpack(
-            ">IIQQQQQQ", phdrs[i * phentsize:(i + 1) * phentsize])
-        # (offset, size, compressed=1 none, 0, 0, encrypted=2 none for PT_LOAD)
-        segs += struct.pack(">QQ4I", p_off + data_off, p_filesz, 1, 0, 0, 2 if p_type == 1 else 0)
-
-    head = struct.pack(">4sIHHIQQ", b"SCE\0", 2, 0x8000, 1, end - 0x10, data_off, len(elf))
-    head += struct.pack(">9Q", 3, app_off, elf_off, phdr_off, data_off + e_shoff,
-                        seg_off, ver_off if sce_version else 0, ctl_off, len(control))
-    blob = bytearray(data_off)
-    for off, chunk in ((0, head), (app_off, app_info), (elf_off, ehdr), (phdr_off, phdrs),
-                       (seg_off, segs), (ver_off, sce_version), (ctl_off, control)):
-        blob[off:off + len(chunk)] = chunk
-    return bytes(blob) + elf
+def repack(orig_self: bytes, patched_elf: bytes) -> bytes:
+    """Write the patched segments back into the stock SELF, keeping its layout."""
+    sections, phdrs, _ = parse_sections(orig_self)
+    out = bytearray(orig_self)
+    for sec in sections:
+        p_offset, p_filesz = _phdr(phdrs, sec.phdr_index)
+        data = patched_elf[p_offset:p_offset + p_filesz]
+        if sec.compressed:
+            data = deflate_to_size(data, sec.size)
+        if len(data) != sec.size:
+            raise ValueError("segment size changed; the container would need new metadata")
+        out[sec.off:sec.off + sec.size] = _ctr(sec.key, sec.iv, data) if sec.encrypted else data
+    return bytes(out)
 
 
 def main(src: str, dst: str) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     with open(src, "rb") as fh:
         orig = fh.read()
-    elf = apply_patches(unpack(orig))
-    out = build_fself(elf, orig)
+    out = repack(orig, apply_patches(unpack(orig)))
     with open(dst, "wb") as fh:
         fh.write(out)
     logger.info("wrote %s (%d bytes) sha256=%s", dst, len(out), hashlib.sha256(out).hexdigest())
