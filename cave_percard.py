@@ -27,7 +27,7 @@ from __future__ import annotations
 OPEN, LSEEK, READ, WRITE, CLOSE, SPRINTF = 0x15532C, 0x14F9F4, 0x14F75C, 0x14F7B4, 0x14F80C, 0xA5420
 PATH_TOC, FMT_TOC = -0x7FAC, -0x7B04
 NAME_VA = 0x1BE780  # 32 free bytes in the writable data segment
-O_CREAT_RDWR = 0x202
+O_CREAT_RDWR = 0x42  # CELL_FS_O_CREAT 0100 | CELL_FS_O_RDWR 02, in octal like the PS3 headers (0x200 is O_TRUNC)
 FRAME = 0xC10
 SAVE = 0xB00  # r20..r26 are saved at SAVE + 8 * k
 FD, DONE, PATH, SECTOR, CARD, DISCPATH, LASTBUF = 0x70, 0x78, 0xC0, 0x200, 0xA00, 0xB80, 0xA80  # 0x80 bytes each

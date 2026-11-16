@@ -557,7 +557,7 @@ class Fs:
         def op(c):
             path, flags = c.cstr(c.r[3]), c.r[4]
             self.log.append(("open", path, flags))
-            if path in self.fail_open or (path not in self.files and not flags & 0x200):
+            if path in self.fail_open or (path not in self.files and not flags & 0x40):  # CELL_FS_O_CREAT
                 c.r[3] = 0x80010006
                 return
             self.files.setdefault(path, bytearray())
@@ -641,7 +641,7 @@ def test_an_existing_card_is_only_put_in_slot_1(cave_elf):
     fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24)), CARD_DIR + "SLUS-00662.VM1": saves})
     cpu, _end = _hook(cave_elf, fs)
     assert cpu.r[30] == C.NAME_VA and bytes(fs.files[CARD_DIR + "SLUS-00662.VM1"]) == saves
-    assert not any(k == "open" and f & 0x200 for k, _p, f in [e for e in fs.log if e[0] == "open"])
+    assert not any(f & 0x40 for k, _p, f in [e for e in fs.log if e[0] == "open"])  # no creating open
 
 
 @pytest.mark.parametrize("line,serial", [
@@ -767,3 +767,10 @@ def test_an_empty_webman_record_changes_nothing(cave_elf):
     fs = Fs({LAST_GAME: b"\n"})
     cpu, _end = _hook(cave_elf, fs, disc_path="", slot1="Other")
     assert cpu.r[30] != C.NAME_VA and not fs.fds
+
+
+def test_the_card_is_created_with_the_ps3_create_and_read_write_flags(cave_elf):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24))})
+    _hook(cave_elf, fs)
+    created = [e[2] for e in fs.log if e[0] == "open" and e[1].endswith("SLUS-00662.VM1") and e[2] != 0]
+    assert created == [0x42]  # O_CREAT (0100) | O_RDWR (02); 0x200 is O_TRUNC and would not create anything
