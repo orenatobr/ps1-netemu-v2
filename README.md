@@ -19,8 +19,9 @@ Back up the stock file first, then copy the new one under the original name:
 /dev_flash/ps1emu/ps1_netemu.self   <-  ps1_netemu_v2.00.self (renamed)
 ```
 
-**Not tested on hardware.** The patches come from static analysis of the
-binary; I had no PS3 or emulator to run them. Keep the backup.
+**Status: v2.00 shows a black screen on hardware** (emulator still responds, the
+PS3 menu is reachable). The cause is being isolated; do not install this build
+yet. The stock file restores normal behavior.
 
 ## What changed (5 instructions)
 
