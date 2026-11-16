@@ -49,7 +49,7 @@ CODE = (
     (0x115AD0, 0xF80100C0, 0xF92100C0, "NTSC: std r9"),
     (0x115AD4, 0xC86100C0, 0xC80100C0, "NTSC: lfd f0"),
     (0x115AD8, 0xFC601E9C, 0xFC00069C, "NTSC: fcfid f0"),
-    (0x115ADC, 0xFC001818, 0xC0E287FC, "NTSC: f7 = 0.0"),
+    (0x115ADC, 0xFC001818, 0xC0E2AA28, "NTSC: f7 = -1 line (anchor 1 line above the edge)"),
     # shared: top = s*(Y1-24); clamp to <= 0 (anchor to the game's start); bottom = top + s*rows
     (0x115824, 0xED806828, 0xED8069B8, "top    = s * (Y1 - c1)"),
     (0x11586C, 0x419A0008, 0x60000000, "r30 is always 0 here: branch was always taken"),
@@ -60,6 +60,7 @@ CODE = (
 CONSTANTS = (
     (0x1BE750, f32(NTSC_STRETCH)),
     (0x1BE754, f32(OVERSCAN_START * NTSC_STRETCH)),
+    (0x1BE758, f32(-1.0)),  # when anchored, start 1 line above the edge (hides the frame's top edge row)
 )
 
 PAD_FLAG_BASE, PAD_STRIDE, PAD_COUNT = 0x2E7CD8, 0xD8, 8
