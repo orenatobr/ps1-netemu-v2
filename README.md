@@ -2,12 +2,17 @@
 
 A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 
-1. **Analog mode on at boot** for every pad. The in-game "Switch Analog Mode" still toggles it,
-   and games that send their own pad configuration still win.
+1. **Analog mode switches on by itself when the game asks for it.** The pad starts digital, like
+   a real DualShock, so digital-only games (Castlevania: Symphony of the Night) keep working.
+   A game that configures the pad (as the original emulator already handled) or that clocks the
+   extra analog bytes gets analog mode right away. The in-game "Switch Analog Mode" still toggles it.
+   A game that only enables analog when you press the ANALOG button needs the menu toggle, as on
+   a real console.
 2. **Vertical overscan like DuckStation (NTSC), computed every frame from the display the game
    declares, with no per-game value.** The picture is shown in a 224-line window from video
-   line 24, so the black bars above and below go away. The width is untouched: the image stays
-   4:3 and is not widened to 16:9.
+   line 24, so the black bars above and below go away. The picture also fills the whole 4:3
+   width: the original emulator keeps a fixed 640/720 margin on the sides, which is removed.
+   The image stays 4:3 and is not widened to 16:9.
    - A game that starts its display after line 24 is anchored to its own start (no bar on top).
    - A game that declares more lines than the window is cropped like DuckStation does.
    - A game that declares fewer lines than the window is stretched down to the screen edge
@@ -50,8 +55,8 @@ metadata and the ELF SHA-1 in the control info are recomputed. The ECDSA signatu
 was: this console does not check it, but it does check the hashes (it rejects a file whose
 hashes are stale with error `80010017`).
 
-The 20 changed words are in `ps3mapi_patch.py` (`CODE`, `CONSTANTS`) and `ps1_netemu_patch.py`
-(`ANALOG`). The patcher checks the original bytes at every site and refuses anything else.
+The changed words are in `ps3mapi_patch.py` (`CODE`, `CONSTANTS`) and `ps1_netemu_patch.py`
+The patcher checks the original bytes at every site and refuses anything else.
 
 ```
 pip install -r requirements-dev.txt
@@ -100,6 +105,6 @@ python ps3mapi_patch.py 192.168.1.85 --watch    # patch every game you start
 
 ## Notes
 
-- The patched binary is Sony's code with 20 words changed. Use it on your own console only; this
+- The patched binary is Sony's code with a few dozen words changed. Use it on your own console only; this
   repository is private for that reason, so downloads need the owner's login.
 - Restore: the package app (Triangle), or copy the original back the same way you installed.

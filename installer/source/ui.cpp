@@ -5,7 +5,7 @@
 namespace ui {
 
 const Text kEn = {"PS1 emulator patch v2.00",
-                  "ps1_netemu.self with analog mode on at boot and DuckStation-style vertical overscan (NTSC).",
+                  "ps1_netemu.self: analog turns on by itself when the game asks for it, and the picture fills the screen (DuckStation-style overscan, NTSC).",
                   "File on the console", "Original (not patched)", "Patched (v2.00)", "Unknown build", "Not found",
                   "Install the patch", "Restore the original", "Exit", "Triangle",
                   "Installed. The original is saved in /dev_hdd0/ps1_netemu_stock.self. Start a PS1 game.",
@@ -15,7 +15,7 @@ const Text kEn = {"PS1 emulator patch v2.00",
                   "Write failed. The original was kept; try again.", "Could not open the system files. This needs custom firmware."};
 
 const Text kPt = {"Patch do emulador de PS1 v2.00",
-                  "ps1_netemu.self com modo analógico ligado na partida e overscan vertical estilo DuckStation (NTSC).",
+                  "ps1_netemu.self: o analógico liga sozinho quando o jogo pede, e a imagem preenche a tela (overscan estilo DuckStation, NTSC).",
                   "Arquivo no console", "Original (sem patch)", "Com patch (v2.00)", "Versão desconhecida", "Não encontrado",
                   "Instalar o patch", "Restaurar o original", "Sair", "Triângulo",
                   "Instalado. O original está salvo em /dev_hdd0/ps1_netemu_stock.self. Abra um jogo de PS1.",

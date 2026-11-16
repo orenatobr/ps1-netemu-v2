@@ -8,7 +8,9 @@ ps1_emu.self but runs ps1_netemu code), then:
     python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
 
 What it does:
-  * analog mode on for the 8 pads;
+  * analog mode switches on by itself when the game asks for it (it starts digital,
+    like a real DualShock), so digital-only games keep working;
+  * the fixed 640/720 horizontal margin is removed, so the picture fills the 4:3 width;
   * vertical "overscan" like DuckStation (NTSC): the picture is shown in a window
     of 224 video lines starting at line 24, cropping what falls outside. Unlike a
     fixed window, when a game starts its display AFTER line 24 the window is
@@ -62,6 +64,12 @@ CODE = (
     (0x115890, 0xFC601E9C, 0xFD801E9C, "f12 = width, converted directly"),
     (0x11589C, 0xFD801818, 0xFDAD3B6E, "bottom overshoot = max(overshoot, 0): fill the screen"),
     (0x1158AC, 0xEC8D1028, 0xEC8D102A, "y1 = 1 + overshoot"),
+    # horizontal: drop the fixed 640/720 (672/720 at 384 wide) "safe area" margin, fill the 4:3 width
+    (0x1158CC, 0xC142881C, 0xC1428820, "x scale numerator = 720 (was 640)"),
+    (0x115B48, 0xC1428828, 0xC1428820, "x scale numerator = 720 (was 672, 384 wide)"),
+    # analog: a game that clocks more bytes than the digital pad answers is reading analog axes
+    (0x0D5904, 0x4BFFFC18, 0x4BFFFBE8, "then finish through the existing li r4,0; b 0xd551c"),
+    (0x0D5900, 0x38800000, 0x9169FFDC, "pad analog flag = nonzero (digital pad asked for extra bytes)"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (
@@ -69,7 +77,6 @@ CONSTANTS = (
     (0x1BE754, f32(OVERSCAN_START * NTSC_STRETCH)),
 )
 
-PAD_FLAG_BASE, PAD_STRIDE, PAD_COUNT = 0x2E7CD8, 0xD8, 8
 
 
 def _get(host: str, path: str) -> str:
@@ -110,9 +117,6 @@ def apply(host: str, revert: bool = False) -> None:
     for addr, _, new, why in sites:
         write_word(host, pid, addr, new)
         logger.info("0x%x <- %08x  %s", addr, new, why)
-    for k in range(PAD_COUNT):
-        write_word(host, pid, PAD_FLAG_BASE + k * PAD_STRIDE, 0 if revert else 1)
-    logger.info("analog flag of %d pads = %d", PAD_COUNT, 0 if revert else 1)
 
 
 def watch(host: str, interval: float = 2.0) -> None:

@@ -43,15 +43,8 @@ class Patch:
     what: str
 
 
-# Analog on at boot: the three places that seed the per-pad analog flag with
-# `config & 1` (clrlwi r0,r0,31) now seed it with 1 (li r0,1).
-ANALOG = tuple(
-    Patch(va, 0x540007FE, 0x38000001, "pad analog flag seeded with 1")
-    for va in (0x0D3080, 0x0D3288, 0x0D4EAC)
-)
-# Vertical overscan + float constants live in ps3mapi_patch (single source of truth).
+# Every change lives in ps3mapi_patch (single source of truth).
 PATCHES = (
-    *ANALOG,
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
 )
