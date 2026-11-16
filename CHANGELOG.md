@@ -2,6 +2,9 @@
 
 The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release tag counts the published builds.
 
+## v2.13
+Documentation only, same package as v2.12: the README lists every feature with its status, limits and code map.
+
 ## v2.12
 Final build of this series. No code change from v2.11, documentation only: everything below is confirmed on a console.
 
