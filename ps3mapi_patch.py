@@ -61,6 +61,12 @@ CODE = (
     (0x115890, 0xFC601E9C, 0xFD801E9C, "f12 = width, converted directly"),
     (0x11589C, 0xFD801818, 0xFDAD3B6E, "bottom overshoot = max(overshoot, 0): fill the screen"),
     (0x1158AC, 0xEC8D1028, 0xEC8D102A, "y1 = 1 + overshoot"),
+    # vibration: the actuator function (0xeb198) used to send force only through a chain of conditions (the
+    # internal block flag at X+0x84 and a strength curve built from settings 50 and 51). The motors now get
+    # exactly what the game commands: small motor = r28 (on/off), large motor = r30 (0..255).
+    (0x0EB2D8, 0x801B0084, 0x7F8AE378, "mr r10,r28: small motor as the game asked"),
+    (0x0EB2DC, 0x39600000, 0x7FCBF378, "mr r11,r30: large motor as the game asked"),
+    (0x0EB2E0, 0x2F800000, 0x48000010, "b 0xeb2f0: skip the block flag and the strength curve"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (

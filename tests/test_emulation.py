@@ -774,3 +774,25 @@ def test_the_card_is_created_with_the_ps3_create_and_read_write_flags(cave_elf):
     _hook(cave_elf, fs)
     created = [e[2] for e in fs.log if e[0] == "open" and e[1].endswith("SLUS-00662.VM1") and e[2] != 0]
     assert created == [0x42]  # O_CREAT (0100) | O_RDWR (02); 0x200 is O_TRUNC and would not create anything
+
+
+# ---- vibration: the motors get what the game commands --------------------------------------------
+
+
+def _motors(elf: bytes, small: int, large: int, blocked: int):
+    """Run the end of the actuator function (0xeb2d8 up to the cellPadSetActDirect call) and return the bytes
+    it would send: (small motor, large motor)."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[27] = STACK, TOC, VIB_STRUCT
+    cpu.r[28], cpu.r[30], cpu.r[9] = small, large, 0x55  # r9 is the stock strength curve's result
+    cpu.wr(VIB_STRUCT + 0x84, 4, blocked)
+    cpu.run(0xEB2D8, {0xEB300})  # 0xeb300 is the bl to cellPadSetActDirect
+    return cpu.rd(STACK + 0x70, 1), cpu.rd(STACK + 0x71, 1)
+
+
+@pytest.mark.parametrize("small,large", [(1, 0xFF), (0, 0x80), (1, 0x01), (0, 0)])
+def test_the_motors_get_what_the_game_commands_even_if_the_stock_flag_blocks(elfs, small, large):
+    stock, patched = elfs
+    assert _motors(stock, small, large, blocked=1) == (0, 0)  # the stock code sends nothing while blocked
+    assert _motors(patched, small, large, blocked=1) == (small, large)
+    assert _motors(patched, small, large, blocked=0) == (small, large)
