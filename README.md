@@ -38,9 +38,23 @@ PAL is not changed and not validated.
   (`0xb4148`), but it also needs the null and empty-string checks on `argv[2]` plus a card-type check, and the binary has no safe free
   space: its zero runs are ELF header fields and data tables, and there are no alignment `nop`s. The in-game
   "Assign Slots" menu does the same by hand.
-- **Analog with vibration (stock behavior).** The emulator already has a "Vibration Function" setting and handles the
-  analog and rumble pad commands a game sends. A game that never sends them cannot be told apart from a digital-only
-  game, so analog is not forced (see above).
+- **Analog with vibration: handled by the stock emulator, not patched.** The pad command table at `0xd5328`
+  (commands `0x40` to `0x4f`) has handlers for every DualShock command a game can send: `0x43` enter
+  configuration (`0xd5de0`), `0x44` set analog mode (`0xd5908`), `0x45` to `0x4a`, `0x4c`, and `0x4d` rumble
+  mapping (`0xd59fc`); only `0x40`, `0x41`, `0x4b`, `0x4e` and `0x4f` fall to the default. So a game that
+  supports analog switches the pad to analog and enables rumble by itself, as on a console, and the emulator's
+  "Vibration Function" setting applies to it. A game that never sends these commands cannot be told apart from a
+  digital-only game, and two attempts to guess (analog forced at boot, analog when the game clocks extra bytes)
+  broke Castlevania: Symphony of the Night, so neither is shipped.
+- **Memory card in slot 1: not implemented, with a concrete blocker.** The cards come as `argv[1]` (slot 1) and
+  `argv[2]` (slot 2, NULL when absent) into `xMcInsert` (`0xb3a..`, insert helper `0xec5d0`). A correct move needs
+  to know whether each card is a PS1 card (`.VM1`) or a PS2 card (`.VM2`, "Sony PS2 Memory Card Format", checked
+  asynchronously at `0x141cb4`), which means a file check (`stat` on `/dev_hdd0/savedata/vmc/<name>.VM1`) plus the
+  null and empty-string handling of `argv[2]`: roughly 45 instructions. The binary has no safe space for that (zero
+  runs are ELF header fields and data tables, no alignment `nop`s). The only free memory is the 0x6c98-byte tail of
+  the last text page (`0x1a9368` to `0x1b0000`), which would need the text segment's `p_filesz` and the SELF section
+  sizes changed. That alters the container layout, cannot be proven without the console, and a mistake stops every game
+  from starting, so it is not shipped. The in-game "Assign Slots" menu does the move by hand.
 - PAL, 480i modes and analog-requesting games are untested.
 
 ## Install
