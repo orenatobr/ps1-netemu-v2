@@ -4,12 +4,16 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 
 1. **Analog mode on at boot** for every pad. The in-game "Switch Analog Mode" still toggles it,
    and games that send their own pad configuration still win.
-2. **Vertical overscan like DuckStation (NTSC).** The picture is shown in a 224-line window from
-   video line 24, so the black bars above and below go away. The width is untouched: the image
-   stays 4:3 and is not widened to 16:9. If a game starts its display after line 24, the window
-   is anchored to the game's own start, so no bar is left at the top.
+2. **Vertical overscan like DuckStation (NTSC), computed every frame from the display the game
+   declares, with no per-game value.** The picture is shown in a 224-line window from video
+   line 24, so the black bars above and below go away. The width is untouched: the image stays
+   4:3 and is not widened to 16:9.
+   - A game that starts its display after line 24 is anchored to its own start (no bar on top).
+   - A game that declares more lines than the window is cropped like DuckStation does.
+   - A game that declares fewer lines than the window is stretched down to the screen edge
+     (no bar at the bottom), by up to a few percent.
 
-Tested on a CFW console with webMAN MOD 1.47.48, Legend of Legaia (USA), NTSC, using the
+Tested on a CFW console with webMAN MOD 1.47.48, Legend of Legaia and Chrono Cross (NTSC), using the
 webMAN netemu option (the process is named `ps1_emu.self` but runs `ps1_netemu` code).
 PAL is not changed and not validated.
 

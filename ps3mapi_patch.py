@@ -39,12 +39,12 @@ def f32(x: float) -> int:
 # (address, stock word, patched word, what). Order matters only loosely; the sites
 # are rewritten between two frames and each frame is consistent once all are done.
 CODE = (
-    # PAL block: f6 = 1.0, f0 = Y1, f7 = Y1 - 19 (so the clamp below is a no-op)
+    # PAL block: f6 = 1.0, f0 = Y1, f7 = 0.0 (PAL is anchored like NTSC, without the 224-line window)
     (0x115808, 0x79200020, 0xC0C287F8, "PAL: f6 = 1.0 (no scaling)"),
     (0x115810, 0xF80100C0, 0xF92100C0, "PAL: std r9"),
     (0x115814, 0xC8E100C0, 0xC80100C0, "PAL: lfd f0"),
     (0x115818, 0xFCE03E9C, 0xFC00069C, "PAL: fcfid f0"),
-    (0x11581C, 0xFC003818, 0xECE06828, "PAL: f7 = Y1 - 19"),
+    (0x11581C, 0xFC003818, 0xC0E287FC, "PAL: f7 = 0.0"),
     # NTSC block: f13 = 24*s, f6 = s, f0 = Y1, f7 = 0.0
     (0x115AC4, 0xC1A28894, 0xC1A2AA24, "NTSC: f13 = 24*s (free slot)"),
     (0x115AC8, 0x79200020, 0xC0C2AA20, "NTSC: f6 = s (free slot)"),
@@ -54,9 +54,14 @@ CODE = (
     (0x115ADC, 0xFC001818, 0xC0E287FC, "NTSC: f7 = 0.0"),
     # shared: top = s*(Y1-24); clamp to <= 0 (anchor to the game's start); bottom = top + s*rows
     (0x115824, 0xED806828, 0xED8069B8, "top    = s * (Y1 - c1)"),
-    (0x11586C, 0x419A0008, 0x60000000, "r30 is always 0 here: branch was always taken"),
-    (0x115870, 0xED8C602A, 0xFD8C61EE, "top    = min(top, 0)  (PAL: no-op)"),
-    (0x115874, 0xEDAC082A, 0xEDA161BA, "bottom = top + s * rows"),
+    (0x115860, 0xFD605E9C, 0xFD405E9C, "f10 = frame height, converted directly"),
+    (0x115864, 0xFD405818, 0x60000000, "nop (the frsp was redundant)"),
+    (0x11586C, 0x419A0008, 0xEDA151B8, "f13 = s*rows - height (r30 is always 0 here: branch was always taken)"),
+    (0x115870, 0xED8C602A, 0xFD8C61EE, "top    = min(top, 0)"),
+    (0x115874, 0xEDAC082A, 0xEDAD602A, "f13 = (top + s*rows) - height"),
+    (0x115890, 0xFC601E9C, 0xFD801E9C, "f12 = width, converted directly"),
+    (0x11589C, 0xFD801818, 0xFDAD3B6E, "bottom overshoot = max(overshoot, 0): fill the screen"),
+    (0x1158AC, 0xEC8D1028, 0xEC8D102A, "y1 = 1 + overshoot"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (
