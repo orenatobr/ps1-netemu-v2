@@ -28,7 +28,7 @@ hash. It refuses any `ps1_netemu.self` that is not the one build the patch was m
 
 ### Option 2: the file
 
-Copy `ps1_netemu_v2.00.self` to `/dev_flash/ps1emu/ps1_netemu.self`. The flash must be mounted
+The release ships only the package. Build the file yourself (see below) and copy `ps1_netemu_v2.00.self` to `/dev_flash/ps1emu/ps1_netemu.self`. The flash must be mounted
 writable (webMAN: open `http://<ps3-ip>/dev_blind`) and webMAN's FTP cannot rename over an
 existing file: delete the old one first. Keep a copy of the original.
 
