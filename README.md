@@ -2,8 +2,9 @@
 
 Patched build of the PS3 PS1 emulator (`ps1_netemu.self`) with two changes:
 
-1. **Vertical stretch.** The picture fills the full height of the screen, so the
-   black bars above and below the game image are gone. The horizontal extent is
+1. **Vertical overscan like DuckStation** (live patcher, NTSC). The picture is placed in
+   a fixed window of video lines 24..248 instead of fitting the display range each
+   game declares, so the black bars above and below are gone. The horizontal extent is
    untouched: the image stays 4:3 (pillarboxed on a 16:9 TV), it is not widened.
 2. **Analog mode on by default.** Every pad starts as a DualShock in analog
    mode. "Switch Analog Mode" in the in-game menu still toggles it, and games
