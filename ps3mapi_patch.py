@@ -26,7 +26,7 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 NTSC_STRETCH = 240 / 224  # nominal NTSC lines / DuckStation overscan window lines (24..248)
-OVERSCAN_START = 24
+OVERSCAN_START = 24  # DuckStation default; --window-start moves the 224-line window (e.g. 30)
 
 
 def f32(x: float) -> int:
@@ -44,10 +44,13 @@ CODE = (
     (0x115874, 0xEDAC082A, 0xEDA161BA, "bottom = top + s * rows"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
-CONSTANTS = (
-    (0x1BE750, f32(NTSC_STRETCH)),
-    (0x1BE754, f32(OVERSCAN_START * NTSC_STRETCH)),
-)
+def constants(window_start: int) -> tuple[tuple[int, int], ...]:
+    return (
+        (0x1BE750, f32(NTSC_STRETCH)),
+        (0x1BE754, f32(window_start * NTSC_STRETCH)),
+    )
+
+
 PAD_FLAG_BASE, PAD_STRIDE, PAD_COUNT = 0x2E7CD8, 0xD8, 8
 
 
@@ -76,7 +79,7 @@ def write_word(host: str, pid: str, addr: int, value: int) -> None:
         raise RuntimeError(f"write to 0x{addr:x} did not stick")
 
 
-def apply(host: str, revert: bool = False) -> None:
+def apply(host: str, revert: bool = False, window_start: int = OVERSCAN_START) -> None:
     pid = find_process(host)
     logger.info("emulator process %s", pid)
     sites = [(a, new if revert else old, old if revert else new, why) for a, old, new, why in CODE]
@@ -84,7 +87,7 @@ def apply(host: str, revert: bool = False) -> None:
         found = read_word(host, pid, addr)
         if found != expect:
             raise RuntimeError(f"0x{addr:x}: expected {expect:08x}, found {found:08x}; not patching")
-    for addr, value in CONSTANTS:  # constants first, so the new code never reads garbage
+    for addr, value in constants(window_start):  # constants first, so the new code never reads garbage
         write_word(host, pid, addr, 0 if revert else value)
     for addr, _, new, why in sites:
         write_word(host, pid, addr, new)
@@ -98,6 +101,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("host")
     ap.add_argument("--revert", action="store_true")
+    ap.add_argument("--window-start", type=int, default=OVERSCAN_START,
+                    help="first video line of the 224-line window (default 24; raise it to crop the top)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    apply(args.host, args.revert)
+    apply(args.host, args.revert, args.window_start)
