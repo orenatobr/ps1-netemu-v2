@@ -2,12 +2,12 @@
 
 A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 
-1. **Analog mode is left as the original emulator has it.** An earlier version forced analog at boot,
-   and a later one switched it on whenever a game clocked extra pad bytes; both broke digital-only
-   games (Castlevania: Symphony of the Night) and the second one stopped the in-game "Switch Analog
-   Mode" from turning it off. A game that configures the pad itself gets analog, as before, and the
-   menu toggle works in both directions. Forcing analog at boot cannot be told apart from a
-   digital-only game, so it is not done.
+1. **Analog mode switches on when a game enters DualShock configuration (command `0x43`).** The change is
+   four words in the data-byte stage of that command (`0xd6b7c..0xd6b98`), checked in a PowerPC interpreter
+   against the original code: entering configuration sets the pad's analog flag, leaving it changes nothing, and the
+   game's own `0x44` (set mode) still has the last word. Digital-only games such as Castlevania never send `0x43`,
+   so they stay digital, and the menu toggle still works both ways. Two earlier approaches broke Castlevania and
+   were dropped: analog forced at boot, and analog whenever a game clocked extra pad bytes.
 2. **Vertical overscan like DuckStation (NTSC), computed every frame from the display the game
    declares, with no per-game value.** The picture is shown in a 224-line window from video
    line 24, so the black bars above and below go away. The width is the original
@@ -55,7 +55,7 @@ PAL is not changed and not validated.
   the last text page (`0x1a9368` to `0x1b0000`), which would need the text segment's `p_filesz` and the SELF section
   sizes changed. That alters the container layout, cannot be proven without the console, and a mistake stops every game
   from starting, so it is not shipped. The in-game "Assign Slots" menu does the move by hand.
-- PAL, 480i modes and analog-requesting games are untested.
+- PAL, 480i modes and analog-aware games are untested.
 
 ## Install
 

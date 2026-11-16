@@ -260,7 +260,10 @@ def main(src: str, dst: str) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     with open(src, "rb") as fh:
         orig = fh.read()
-    out = repack(orig, apply_patches(extend_text(unpack(orig))))
+    elf = unpack(orig)
+    if any(p.va >= CAVE_VA for p in PATCHES):  # only grow the segment when code lives in the cave
+        elf = extend_text(elf)
+    out = repack(orig, apply_patches(elf))
     with open(dst, "wb") as fh:
         fh.write(out)
     logger.info("wrote %s (%d bytes) sha256=%s", dst, len(out), hashlib.sha256(out).hexdigest())
