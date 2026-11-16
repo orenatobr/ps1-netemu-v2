@@ -5,7 +5,7 @@ returns the 32-bit words. Branch targets are labels or absolute addresses. Anyth
 """
 from __future__ import annotations
 
-REG = {f"r{i}": i for i in range(32)}
+REG = {f"r{i}": i for i in range(32)} | {f"f{i}": i for i in range(32)}
 
 
 def _r(x: str) -> int:
@@ -30,7 +30,7 @@ def _b(disp: int, link: int) -> int:
     return (18 << 26) | (disp & 0x03FFFFFC) | link
 
 
-CONDS = {"beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28)}  # all on cr7
+CONDS = {"beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28), "bgt": (12, 29), "ble": (4, 29)}  # cr7
 
 
 def assemble(base: int, lines: list[tuple]) -> list[int]:
@@ -53,6 +53,8 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
         elif m == "lis":
             w = (15 << 26) | (_r(a[0]) << 21) | _i16(a[1])
         elif m == "addi":
+            if a[1] == "r0":
+                raise ValueError("addi with r0 as the source reads the literal 0; use li")
             w = (14 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | _i16(a[2])
         elif m == "ori":
             w = (24 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | _i16(a[2])
@@ -84,6 +86,28 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
             w = _b(tgt(a[0]) - pc, 0)
         elif m == "bl":
             w = _b(tgt(a[0]) - pc, 1)
+        elif m == "rlwinm":
+            w = (21 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | (a[2] << 11) | (a[3] << 6) | (a[4] << 1)
+        elif m == "subf":
+            w = (31 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (40 << 1)
+        elif m in ("lfs", "lfd", "stfs", "stfd"):
+            op = {"lfs": 48, "lfd": 50, "stfs": 52, "stfd": 54}[m]
+            w = (op << 26) | (_r(a[0]) << 21) | (_r(a[2]) << 16) | _i16(a[1])
+        elif m in ("fsubs", "fadds", "fdivs"):
+            xo = {"fsubs": 20, "fadds": 21, "fdivs": 18}[m]
+            w = (59 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (xo << 1)
+        elif m == "fmuls":  # fmuls frt,fra,frc
+            w = (59 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 6) | (25 << 1)
+        elif m == "fmadds":  # fmadds frt,fra,frc,frb = fra*frc+frb
+            w = (59 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[3]) << 11) | (_r(a[2]) << 6) | (29 << 1)
+        elif m == "fsel":  # fsel frt,fra,frc,frb = fra >= 0 ? frc : frb
+            w = (63 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[3]) << 11) | (_r(a[2]) << 6) | (23 << 1)
+        elif m == "fcmpu":  # always cr7
+            w = (63 << 26) | (7 << 23) | (_r(a[0]) << 16) | (_r(a[1]) << 11)
+        elif m == "fcfid":
+            w = (63 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 11) | (846 << 1)
+        elif m == "frsp":
+            w = (63 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 11) | (12 << 1)
         elif m == "mflr":
             w = 0x7C0802A6 | (_r(a[0]) << 21)
         elif m == "mtlr":

@@ -24,6 +24,10 @@ def _s16(x: int) -> int:
     return x - 0x10000 if x & 0x8000 else x
 
 
+def _s64(x: int) -> int:
+    return x - (1 << 64) if x & (1 << 63) else x
+
+
 def _s32(x: int) -> int:
     x &= M32
     return x - (1 << 32) if x & 0x80000000 else x
@@ -38,6 +42,7 @@ class Cpu:
         self.cr = [(0, 0, 0)] * 8
         self.mem: dict[int, int] = {}
         self.lr = 0
+        self.f = [0.0] * 32
         self.mocks: dict[int, object] = {}  # va -> python stand-in for a called function
 
     def code(self, pc: int) -> int:
@@ -70,7 +75,7 @@ class Cpu:
 
     def run(self, pc: int, stop: set[int]) -> int:
         """Execute from `pc` until pc lands in `stop`; returns that pc."""
-        for _ in range(500):
+        for _ in range(60000):
             if pc in stop:
                 return pc
             w = self.code(pc)
@@ -96,6 +101,46 @@ class Cpu:
             elif op == 10:  # cmplwi
                 a, b = self.r[ra] & M32, w & 0xFFFF
                 self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
+            elif op == 21:  # rlwinm
+                sh, mb, me = rb, (w >> 6) & 31, (w >> 1) & 31
+                x = self.r[rt] & M32
+                rot = ((x << sh) | (x >> (32 - sh))) & M32 if sh else x
+                mask = ((1 << (me - mb + 1)) - 1) << (31 - me)
+                self.r[ra] = rot & mask
+            elif op in (48, 50, 52, 54):  # lfs lfd stfs stfd
+                ea = (self.ra0(ra) + _s16(w & 0xFFFF)) & M64
+                if op == 48:
+                    self.f[rt] = struct.unpack(">f", struct.pack(">I", self.rd(ea, 4)))[0]
+                elif op == 50:
+                    self.f[rt] = struct.unpack(">d", struct.pack(">Q", self.rd(ea, 8)))[0]
+                elif op == 52:
+                    self.wr(ea, 4, struct.unpack(">I", struct.pack(">f", self.f[rt]))[0])
+                else:
+                    self.wr(ea, 8, struct.unpack(">Q", struct.pack(">d", self.f[rt]))[0])
+            elif op in (59, 63):
+                fa, fb, fc, xo5, xo10 = ra, rb, (w >> 6) & 31, (w >> 1) & 31, (w >> 1) & 0x3FF
+                s32 = lambda x: struct.unpack(">f", struct.pack(">f", x))[0]
+                if op == 59 and xo5 == 20:
+                    self.f[rt] = s32(self.f[fa] - self.f[fb])
+                elif op == 59 and xo5 == 21:
+                    self.f[rt] = s32(self.f[fa] + self.f[fb])
+                elif op == 59 and xo5 == 18:
+                    self.f[rt] = s32(self.f[fa] / self.f[fb]) if self.f[fb] else float("inf")
+                elif op == 59 and xo5 == 25:
+                    self.f[rt] = s32(self.f[fa] * self.f[fc])
+                elif op == 59 and xo5 == 29:
+                    self.f[rt] = s32(self.f[fa] * self.f[fc] + self.f[fb])
+                elif op == 63 and xo5 == 23:  # fsel
+                    self.f[rt] = self.f[fc] if self.f[fa] >= 0 else self.f[fb]
+                elif op == 63 and xo10 == 0:  # fcmpu
+                    a, b = self.f[fa], self.f[fb]
+                    self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
+                elif op == 63 and xo10 == 846:  # fcfid
+                    self.f[rt] = float(_s64(struct.unpack(">Q", struct.pack(">d", self.f[fb]))[0]))
+                elif op == 63 and xo10 == 12:  # frsp
+                    self.f[rt] = s32(self.f[fb])
+                else:
+                    raise NotImplementedError(f"{pc:#x}: float op {op}/{xo5}/{xo10} in {w:08x}")
             elif op == 36:  # stw
                 self.wr((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 4, self.r[rt] & M32)
             elif op == 30 and (w >> 2) & 7 == 0:  # rldicl
@@ -106,6 +151,8 @@ class Cpu:
                 xo = (w >> 1) & 0x3FF
                 if xo == 266:  # add
                     self.r[rt] = (self.r[ra] + self.r[rb]) & M64
+                elif xo == 40:  # subf
+                    self.r[rt] = (self.r[rb] - self.r[ra]) & M64
                 elif xo == 104:  # neg
                     self.r[rt] = (-self.r[ra]) & M64
                 elif xo == 986:  # extsw (RS in the RT slot, RA is the destination)
@@ -287,3 +334,95 @@ def test_no_ps1_card_in_slot_2_means_stock_behavior(cave_elf, slot2):
 def test_every_probe_closes_the_file_it_opened(cave_elf):
     _cpu, _end, _s1, _s2, log = _slots(cave_elf, "Other", "Game", CARD)
     assert [k for k, _ in log].count("open") == [k for k, _ in log].count("close") == 2
+
+
+# ---- content-aware overscan cave --------------------------------------------------------------
+
+import cave_overscan as O
+
+OBJ, OUT, STATE = 0x40000000, 0x30000000, 0x31000000
+SOTN = {"x1": -0.8694444, "x2": 0.9013889, "y1": -1.0714286, "y2": 1.0714286}
+
+
+def _e3(x, y):
+    return 0xE3000000 | (y << 10) | x
+
+
+def _e4(x, y):
+    return 0xE4000000 | (y << 10) | x
+
+
+def _reference(q, a, b, h):
+    tw0, tw1 = (-1 - q["y1"]) / (q["y2"] - q["y1"]), (1 - q["y1"]) / (q["y2"] - q["y1"])
+    t0, t1 = max(a / h, tw0), min(b / h, tw1)
+    ln = t1 - t0
+    s = (tw1 - tw0) / ln
+    zx = (s + 1) / 2
+    return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
+
+
+def _overscan(elf, words, q=SOTN, y1d=16, y2d=256):
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
+    cpu.wr(STATE + 0x1C, 4, y1d)
+    cpu.wr(STATE + 0x20, 4, y2d)
+    cpu.wr(TOC - 0x77F8, 4, OBJ)
+    for i, w in enumerate(words):
+        cpu.wr(OBJ + 0x60 + 4 * i, 4, w)
+    cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = q["x1"], q["x2"], q["y1"], q["y2"]
+    cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = (struct.unpack(">f", struct.pack(">f", v))[0] for v in (q["x1"], q["x2"], q["y1"], q["y2"]))
+    sent_f = {i: 100.5 + i for i in (0, 1, 2, 3, 8, 9, 10, 13)}
+    sent_r = {i: 0x5000 + i for i in (0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)}
+    for i, v in sent_f.items():
+        cpu.f[i] = v
+    for i, v in sent_r.items():
+        cpu.r[i] = v
+    end = cpu.run(O.HOOK_VA, {O.RESUME})
+    assert end == O.RESUME and cpu.r[1] == STACK
+    assert all(cpu.f[i] == v for i, v in sent_f.items()) and all(cpu.r[i] == v for i, v in sent_r.items())
+    assert cpu.rd(OUT + 0x1AC, 4) == struct.unpack(">I", struct.pack(">f", cpu.f[6]))[0]  # the displaced store ran
+    return {"x1": cpu.f[6], "x2": cpu.f[5], "y1": cpu.f[7], "y2": cpu.f[4]}
+
+
+def _same(a, b, tol=1e-4):
+    return all(abs(a[k] - b[k]) < tol for k in a)
+
+
+def test_castlevania_lines_20_to_226_fill_the_window(cave_elf):
+    words = [_e3(0, 20), _e4(255, 226), 0x2C808080, _e3(256, 20), _e4(511, 226), _e3(0, 0), _e4(1023, 1023)]
+    got = _overscan(cave_elf, words)
+    assert _same(got, _reference(SOTN, 20, 227, 240))
+    assert got["y1"] < SOTN["y1"] and got["y2"] > SOTN["y2"]  # the picture grows past the screen on both sides
+
+
+def test_a_game_that_fills_its_frame_is_left_alone(cave_elf):
+    assert _same(_overscan(cave_elf, [_e3(0, 0), _e4(255, 239)]), SOTN)
+
+
+@pytest.mark.parametrize("words", [[], [_e3(0, 0), _e4(1023, 1023)], [_e3(0, 20)], [_e4(255, 226)], [0x2C808080] * 8])
+def test_no_usable_draw_area_changes_nothing(cave_elf, words):
+    assert _same(_overscan(cave_elf, words), SOTN)
+
+
+@pytest.mark.parametrize("y1d,y2d", [(20, 308), (0, 480), (16, 100)])
+def test_heights_outside_ntsc_240_are_left_alone(cave_elf, y1d, y2d):
+    assert _same(_overscan(cave_elf, [_e3(0, 20), _e4(255, 226)], y1d=y1d, y2d=y2d), SOTN)
+
+
+def test_a_top_in_the_lower_half_is_ignored(cave_elf):
+    assert _same(_overscan(cave_elf, [_e3(0, 150), _e4(255, 250)]), SOTN)
+
+
+def test_the_tallest_area_wins_and_the_bottom_is_clamped(cave_elf):
+    words = [_e3(0, 100), _e4(255, 219), _e3(0, 10), _e4(255, 250)]
+    assert _same(_overscan(cave_elf, words), _reference(SOTN, 10, 240, 240))
+
+
+def test_a_degenerate_quad_is_left_alone(cave_elf):
+    q = {"x1": -0.9, "x2": 0.9, "y1": 0.0, "y2": 0.1}
+    assert _same(_overscan(cave_elf, [_e3(0, 20), _e4(255, 226)], q=q), q)
+
+
+def test_the_stock_overscan_window_is_kept_when_the_game_draws_more(cave_elf):
+    got = _overscan(cave_elf, [_e3(0, 2), _e4(255, 237)])  # rows 2..238: wider than the 8..232 window
+    assert _same(got, SOTN)
