@@ -40,7 +40,7 @@ The backup is only made when the app finds the original on the console. If the p
 was put there by another route first, there is no backup and **Triangle** answers "no backup":
 copy the original (SHA-256 `27d4121e...`) to `/dev_hdd0/ps1_netemu_stock.self` yourself.
 The `.self` is embedded in the package and is not offered as a separate download. This is a deliberate
-deviation from the original goal (a downloadable `ps1_netemu_v2.00.self`), made at the owner's request.
+deviation from the original goal (a downloadable `ps1_netemu_v2.00.self`), made at the owner's request (their words: "então não precisa ter o .self no release latest").
 The app now shows this warning on screen when the patch is installed and no backup exists.
 
 ### Option 2: the file
