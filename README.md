@@ -10,9 +10,9 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
    digital-only game, so it is not done.
 2. **Vertical overscan like DuckStation (NTSC), computed every frame from the display the game
    declares, with no per-game value.** The picture is shown in a 224-line window from video
-   line 24, so the black bars above and below go away. The picture also fills the whole 4:3
-   width: the original emulator keeps a fixed 640/720 margin on the sides, which is removed.
-   The image stays 4:3 and is not widened to 16:9.
+   line 24, so the black bars above and below go away. The width is the original
+   emulator's: the image stays 4:3 and is not widened (an earlier version widened it by removing the emulator's
+   640/720 side margin, which was not requested, and it was reverted).
    - A game that starts its display after line 24 is anchored to its own start (no bar on top).
    - A game that declares more lines than the window is cropped like DuckStation does.
    - A game that declares fewer lines than the window is stretched down to the screen edge

@@ -5,7 +5,7 @@
 namespace ui {
 
 const Text kEn = {"PS1 emulator patch v2.00",
-                  "ps1_netemu.self: the picture fills the screen (DuckStation-style overscan, NTSC).",
+                  "ps1_netemu.self: DuckStation-style vertical overscan (NTSC), 4:3 width unchanged.",
                   "File on the console", "Original (not patched)", "Patched (v2.00)", "Unknown build", "Not found",
                   "Install the patch", "Restore the original", "Exit", "Triangle",
                   "Installed. The original is saved in /dev_hdd0/ps1_netemu_stock.self. Start a PS1 game.",
@@ -16,7 +16,7 @@ const Text kEn = {"PS1 emulator patch v2.00",
                   "The patch is installed but there is no backup of the original, so Triangle cannot restore it. Copy the original to /dev_hdd0/ps1_netemu_stock.self."};
 
 const Text kPt = {"Patch do emulador de PS1 v2.00",
-                  "ps1_netemu.self: a imagem preenche a tela (overscan estilo DuckStation, NTSC).",
+                  "ps1_netemu.self: overscan vertical estilo DuckStation (NTSC), largura 4:3 inalterada.",
                   "Arquivo no console", "Original (sem patch)", "Com patch (v2.00)", "Versão desconhecida", "Não encontrado",
                   "Instalar o patch", "Restaurar o original", "Sair", "Triângulo",
                   "Instalado. O original está salvo em /dev_hdd0/ps1_netemu_stock.self. Abra um jogo de PS1.",

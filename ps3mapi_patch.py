@@ -8,7 +8,6 @@ ps1_emu.self but runs ps1_netemu code), then:
     python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
 
 What it does:
-  * the fixed 640/720 horizontal margin is removed, so the picture fills the 4:3 width;
   * vertical "overscan" like DuckStation (NTSC): the picture is shown in a window
     of 224 video lines starting at line 24, cropping what falls outside. Unlike a
     fixed window, when a game starts its display AFTER line 24 the window is
@@ -62,9 +61,6 @@ CODE = (
     (0x115890, 0xFC601E9C, 0xFD801E9C, "f12 = width, converted directly"),
     (0x11589C, 0xFD801818, 0xFDAD3B6E, "bottom overshoot = max(overshoot, 0): fill the screen"),
     (0x1158AC, 0xEC8D1028, 0xEC8D102A, "y1 = 1 + overshoot"),
-    # horizontal: drop the fixed 640/720 (672/720 at 384 wide) "safe area" margin, fill the 4:3 width
-    (0x1158CC, 0xC142881C, 0xC1428820, "x scale numerator = 720 (was 640)"),
-    (0x115B48, 0xC1428828, 0xC1428820, "x scale numerator = 720 (was 672, 384 wide)"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (
