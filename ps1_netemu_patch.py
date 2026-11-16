@@ -30,6 +30,8 @@ APP_RIV = bytes.fromhex("FD40664E2EBBA01BF359B0DCDF543DA4")
 EXPECTED_KEY_REVISION = 0x1C
 EMPTY_STORED_BLOCK = b"\x00\x00\x00\xff\xff"  # non-final, zero-length deflate block
 CONTROL_OFF = 0x3A0  # control info; its last block holds the SHA-1 of the whole ELF
+CAVE_VA = 0x1A9380  # first aligned address after the stock text segment (ends 0x1a9368)
+CAVE_SIZE = 0x1000
 ELF_DIGEST_OFF = CONTROL_OFF + 0x30 + 0x10 + 0x14  # type-1 block (0x30) + header (0x10) + magic (0x14)
 
 
@@ -157,6 +159,31 @@ def _va_to_off(elf: bytes, va: int) -> int:
     raise ValueError(f"va 0x{va:x} not in a loadable segment")
 
 
+def extend_text(elf: bytes, extra: int = CAVE_SIZE) -> bytes:
+    """Grow the first loadable segment (text) by `extra` zero bytes and return the new ELF.
+
+    The stock text segment ends at 0x1a9368 and the loader already maps its last page up to
+    0x1b0000, so the new bytes (a code cave) need no extra address space. p_filesz and p_memsz
+    of program header 0 are updated; the ELF header copy lives inside that segment, so the
+    change travels with it.
+    """
+    e_phoff, = struct.unpack(">Q", elf[0x20:0x28])
+    phentsize, phnum = struct.unpack(">HH", elf[0x36:0x3A])
+    p_type, _f, p_off, p_va, _pa, p_filesz, p_memsz, _al = struct.unpack(">IIQQQQQQ", elf[e_phoff:e_phoff + 56])
+    if p_type != 1 or p_off != 0 or p_filesz != p_memsz:
+        raise ValueError("program header 0 is not the plain text segment")
+    new = p_filesz + extra
+    for i in range(1, phnum):
+        t, _f2, o, v, *_ = struct.unpack(">IIQQQQQQ", elf[e_phoff + i * phentsize:e_phoff + (i + 1) * phentsize])
+        if t == 1 and o and o < new:
+            raise ValueError("the extended text segment would overlap the next file segment")
+        if t == 1 and v and v < p_va + new and v > p_va:
+            raise ValueError("the extended text segment would overlap the next memory segment")
+    out = bytearray(elf)
+    struct.pack_into(">QQ", out, e_phoff + 32, new, new)
+    return bytes(out)
+
+
 def apply_patches(elf: bytes, patches: tuple[Patch, ...] = PATCHES) -> bytes:
     """Return a patched copy of `elf`; refuses to touch unexpected bytes."""
     out = bytearray(elf)
@@ -173,19 +200,33 @@ def apply_patches(elf: bytes, patches: tuple[Patch, ...] = PATCHES) -> bytes:
 def deflate_to_size(data: bytes, size: int) -> bytes:
     """Compress `data` as a zlib stream of exactly `size` bytes.
 
-    Tries zlib settings until the stream fits and the leftover is a multiple of 5,
+    Tries zlib settings (level, memLevel, strategy) until the stream fits and the leftover is a multiple of 5,
     then pads with empty non-final stored blocks right after the 2-byte zlib header.
     """
     for level in (6, 9, 8, 7, 5, 4, 3, 2, 1):
-        for mem in range(8, 0, -1):
-            comp = zlib.compressobj(level, zlib.DEFLATED, 15, mem)
-            stream = comp.compress(data) + comp.flush()
-            pad = size - len(stream)
-            if pad >= 0 and pad % len(EMPTY_STORED_BLOCK) == 0:
-                out = stream[:2] + EMPTY_STORED_BLOCK * (pad // len(EMPTY_STORED_BLOCK)) + stream[2:]
-                if len(out) != size or zlib.decompress(out) != data:
-                    raise AssertionError("padded stream does not round-trip")
-                return out
+        for mem in range(9, 0, -1):
+            for strategy in (zlib.Z_DEFAULT_STRATEGY, zlib.Z_FILTERED):
+                comp = zlib.compressobj(level, zlib.DEFLATED, 15, mem, strategy)
+                stream = comp.compress(data) + comp.flush()
+                pad = size - len(stream)
+                if pad >= 0 and pad % len(EMPTY_STORED_BLOCK) == 0:
+                    out = stream[:2] + EMPTY_STORED_BLOCK * (pad // len(EMPTY_STORED_BLOCK)) + stream[2:]
+                    if len(out) != size or zlib.decompress(out) != data:
+                        raise AssertionError("padded stream does not round-trip")
+                    return out
+    # No whole-stream setting lands on a multiple of 5: add one sync flush at a varying point,
+    # which keeps the dictionary but shifts the stream length by a few bytes.
+    for level in (9, 8, 7, 6):
+        for mem in (9, 8):
+            for cut in range(4096, len(data), 4096):
+                comp = zlib.compressobj(level, zlib.DEFLATED, 15, mem)
+                stream = comp.compress(data[:cut]) + comp.flush(zlib.Z_SYNC_FLUSH) + comp.compress(data[cut:]) + comp.flush()
+                pad = size - len(stream)
+                if pad >= 0 and pad % len(EMPTY_STORED_BLOCK) == 0:
+                    out = stream[:2] + EMPTY_STORED_BLOCK * (pad // len(EMPTY_STORED_BLOCK)) + stream[2:]
+                    if len(out) != size or zlib.decompress(out) != data:
+                        raise AssertionError("padded stream does not round-trip")
+                    return out
     raise ValueError(f"cannot fit a {len(data)} byte segment into {size} compressed bytes")
 
 
@@ -195,8 +236,11 @@ def repack(orig_self: bytes, patched_elf: bytes) -> bytes:
     Section HMACs (inside the encrypted metadata) and the ELF SHA-1 in the control
     info are recomputed. The ECDSA signature cannot be, and is left as it was.
     """
-    sections, phdrs, _, meta = parse_all(orig_self)
+    sections, phdrs, e_phoff, meta = parse_all(orig_self)
+    phdr_off = struct.unpack(">Q", orig_self[0x38:0x40])[0]
+    phdrs = patched_elf[e_phoff:e_phoff + len(phdrs)]  # sizes may have grown (extend_text)
     out = bytearray(orig_self)
+    out[phdr_off:phdr_off + len(phdrs)] = phdrs
     blob = bytearray(meta.blob)
     for sec in sections:
         p_offset, p_filesz = _phdr(phdrs, sec.phdr_index)
@@ -216,7 +260,7 @@ def main(src: str, dst: str) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     with open(src, "rb") as fh:
         orig = fh.read()
-    out = repack(orig, apply_patches(unpack(orig)))
+    out = repack(orig, apply_patches(extend_text(unpack(orig))))
     with open(dst, "wb") as fh:
         fh.write(out)
     logger.info("wrote %s (%d bytes) sha256=%s", dst, len(out), hashlib.sha256(out).hexdigest())

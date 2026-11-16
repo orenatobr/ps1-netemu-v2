@@ -41,6 +41,25 @@ def test_patches_change_only_target_words():
         assert struct.unpack(">I", out[0x200 + p.va - LOAD_VA:][:4])[0] == p.new
 
 
+def test_extend_text_grows_only_the_text_sizes():
+    elf = bytearray(synthetic_elf())
+    e_phoff, = struct.unpack(">Q", elf[0x20:0x28])
+    struct.pack_into(">Q", elf, e_phoff + 8, 0)  # the real text segment starts at file offset 0
+    elf = bytes(elf)
+    out = P.extend_text(elf, 0x1000)
+    assert struct.unpack(">QQ", out[e_phoff + 32:e_phoff + 48]) == (LOAD_SIZE + 0x1000, LOAD_SIZE + 0x1000)
+    assert out[:e_phoff + 32] == elf[:e_phoff + 32] and out[e_phoff + 48:] == elf[e_phoff + 48:]
+
+
+def test_extend_text_refuses_a_non_text_first_segment():
+    elf = bytearray(synthetic_elf())
+    e_phoff, = struct.unpack(">Q", elf[0x20:0x28])
+    struct.pack_into(">Q", elf, e_phoff + 8, 0)
+    struct.pack_into(">Q", elf, e_phoff + 40, LOAD_SIZE + 8)  # p_memsz != p_filesz
+    with pytest.raises(ValueError, match="plain text"):
+        P.extend_text(bytes(elf))
+
+
 def test_patch_refuses_unexpected_bytes():
     elf = bytearray(synthetic_elf())
     elf[0x200 + P.PATCHES[0].va - LOAD_VA] ^= 0xFF
@@ -65,7 +84,7 @@ def test_deflate_to_size_refuses_when_it_cannot_fit():
 @pytest.mark.skipif("PS1_NETEMU_SELF" not in os.environ, reason="stock SELF not provided")
 def test_real_file_repack_keeps_layout_and_recomputes_integrity():
     stock = Path(os.environ["PS1_NETEMU_SELF"]).read_bytes()
-    patched = P.apply_patches(P.unpack(stock))
+    patched = P.apply_patches(P.extend_text(P.unpack(stock)))
     out = P.repack(stock, patched)
     assert len(out) == len(stock)
     sections, _, _, meta = P.parse_all(out)
@@ -74,6 +93,8 @@ def test_real_file_repack_keeps_layout_and_recomputes_integrity():
         changeable[s.off:s.off + s.size] = b"\x01" * s.size
     changeable[meta.file_off:meta.file_off + len(meta.blob)] = b"\x01" * len(meta.blob)
     changeable[P.ELF_DIGEST_OFF:P.ELF_DIGEST_OFF + 20] = b"\x01" * 20
+    phdr_off = struct.unpack(">Q", stock[0x38:0x40])[0]
+    changeable[phdr_off + 32:phdr_off + 48] = b"\x01" * 16  # p_filesz / p_memsz of the grown text segment
     assert all(stock[i] == out[i] for i in range(len(stock)) if not changeable[i])
     assert P.unpack(out) == patched  # decrypts back to exactly the patched ELF
     assert hashlib.sha1(patched).digest() == out[P.ELF_DIGEST_OFF:P.ELF_DIGEST_OFF + 20]
