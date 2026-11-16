@@ -32,9 +32,10 @@ PAL is not changed and not validated.
   per-frame scan of the frame content, which is not implemented, because the frame lives in RSX memory
   that only the emulator can read. Games that fill their declared area (Legend of Legaia, Chrono Cross) are fine.
 - **Memory card in slot 1 (not implemented).** The emulator's `main` receives the cards as arguments
-  (`argv[1]` = slot 1, `argv[2]` = slot 2, NULL when absent) and calls `xMcInsert` (`0xb3a..`). When slot 1 comes
-  empty (`0xb4148`) and slot 2 has a card, the card could be moved to slot 1 through the existing path at `0xb4124`.
-  That needs about 10 new instructions (null and empty-string checks on `argv[2]`), and the binary has no safe free
+  (`argv[1]` = slot 1, `argv[2]` = slot 2, NULL when absent) and calls `xMcInsert` (`0xb3a..`). The rule is not as simple as
+  "slot 1 empty and slot 2 has a card": the emulator shares code with PS2 and also knows `.VM2` cards, so the card must be
+  a PS1 card (`.VM1`) before it is moved. The move itself would reuse the path at `0xb4124` when slot 1 comes empty
+  (`0xb4148`), but it also needs the null and empty-string checks on `argv[2]` plus a card-type check, and the binary has no safe free
   space: its zero runs are ELF header fields and data tables, and there are no alignment `nop`s. The in-game
   "Assign Slots" menu does the same by hand.
 - **Analog with vibration (stock behavior).** The emulator already has a "Vibration Function" setting and handles the
