@@ -13,7 +13,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    (toggling it changed no setting, pad record or pad state), so vibration no longer depends on it. Digital-only games
    such as Castlevania never send `0x43` and stay digital. Two earlier approaches broke Castlevania and were dropped:
    analog forced at boot, and analog whenever a game clocked extra pad bytes. Checked in a PowerPC interpreter against the
-   stock code; analog was confirmed on a console, the vibration pass has not run on one yet.
+   stock code; analog and vibration were confirmed on a console (Chrono Cross).
 2. **DuckStation-style vertical overscan, cropped to the area the game really draws.** The stock formula shows a
    224-line window (video lines 24 to 248) of the display the game declares. On top of it, new code in the text
    segment extension reads the GPU packet buffer for the game's draw area (`GP0 E3/E4`, never decoded on the CPU side)
@@ -45,7 +45,8 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    other disc naming (`CD2`, `Disc2`) gets one card per disc. The earlier rule (a PS1 card in slot 2 moves to slot 1
    when slot 1 has none) stays as the fallback. Saves kept in the old shared `PS1.VM1` stay there: assign it to slot 2
    in the emulator menu to copy them into a per-game card. 99 tests run the real emulator code in a PowerPC
-   interpreter with a simulated file system and synthetic discs; it has not run on a console yet.
+   interpreter with a simulated file system and synthetic discs, and the whole flow was confirmed on a console
+   (Chrono Cross disc 1: serial read from the disc, card created, shown in slot 1 as `SLUS-01041.VM1`).
 
 ## Known limitations
 
@@ -71,7 +72,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
   "Vibration Function" setting applies to it. A game that never sends these commands cannot be told apart from a
   digital-only game, and two attempts to guess (analog forced at boot, analog when the game clocks extra bytes)
   broke Castlevania: Symphony of the Night, so neither is shipped.
-- PAL, 480i modes and analog-aware games are untested.
+- PAL and 480i modes are untested; they keep the stock behavior.
 
 ## Install
 
