@@ -44,15 +44,33 @@ def test_patch_refuses_unexpected_bytes():
         P.apply_patches(bytes(elf))
 
 
+def fake_orig_self() -> bytes:
+    """Header-shaped bytes with a valid flags block and digest block at 0x3a0."""
+    flags = struct.pack(">IIQ", 1, 0x30, 1) + bytes(0x20)
+    digest = struct.pack(">IIQ", 2, 0x40, 0) + bytes(range(0x30))
+    return bytes(0x3A0) + flags + digest
+
+
 def test_fself_roundtrip():
     elf = P.apply_patches(synthetic_elf())
-    out = P.build_fself(elf, bytes(0x410))
+    out = P.build_fself(elf, fake_orig_self())
     magic, _v, flags, typ, _meta, hdr_len, data_len = struct.unpack(">4sIHHIQQ", out[:32])
     assert (magic, flags, typ) == (b"SCE\0", 0x8000, 1)
     assert out[hdr_len:] == elf and data_len == len(elf) and hdr_len % 0x80 == 0
     seg_off = struct.unpack(">9Q", out[0x20:0x68])[5]
     off, size, comp, _, _, enc = struct.unpack(">QQ4I", out[seg_off:seg_off + 0x20])
     assert (off, size, comp, enc) == (0x200 + hdr_len, LOAD_SIZE, 1, 2)
+
+
+def test_fself_minimal_header_roundtrip():
+    orig = fake_orig_self()
+    flags, digest = orig[0x3A0:0x3D0], orig[0x3D0:0x410]
+    out = P.build_fself(P.apply_patches(synthetic_elf()), orig)
+    ext = struct.unpack(">9Q", out[0x20:0x68])
+    ctl_off, ctl_size = ext[7], ext[8]
+    assert out[ctl_off:ctl_off + ctl_size] == digest  # only the digest block survives
+    assert ext[6] == 0  # no SCE version block
+    assert P.control_blocks(flags + digest).keys() == {1, 2}
 
 
 @pytest.mark.skipif("PS1_NETEMU_SELF" not in os.environ, reason="stock SELF not provided")

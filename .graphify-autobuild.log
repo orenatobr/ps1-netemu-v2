@@ -1,0 +1,8 @@
+[graphify extract] scanning /Users/renato.pereira/Workspace/ps1_netemu_v2
+[graphify extract] --code-only: skipping 2 non-code file(s) (2 docs, 0 papers, 0 images) — no LLM extraction
+[graphify extract] found 2 code, 0 docs, 0 papers, 0 images
+[graphify extract] 2 file(s) not classified (no supported extension or shebang), skipped: .gitignore, .graphify-autobuild.log
+[graphify extract] AST extraction on 2 code files...
+[graphify extract] wrote /Users/renato.pereira/Workspace/ps1_netemu_v2/graphify-out/graph.json: 22 nodes, 30 edges, 4 communities
+[graphify extract] wrote /Users/renato.pereira/Workspace/ps1_netemu_v2/graphify-out/.graphify_analysis.json
+[graphify extract] next: run `graphify cluster-only /Users/renato.pereira/Workspace/ps1_netemu_v2` to generate GRAPH_REPORT.md and name communities

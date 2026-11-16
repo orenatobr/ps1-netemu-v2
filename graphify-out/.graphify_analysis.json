@@ -1,0 +1,109 @@
+{
+  "communities": {
+    "0": [
+      "ps1_netemu_patch",
+      "ps1_netemu_patch_build_fself",
+      "ps1_netemu_patch_ctr",
+      "ps1_netemu_patch_main",
+      "ps1_netemu_patch_rationale_1",
+      "ps1_netemu_patch_rationale_132",
+      "ps1_netemu_patch_rationale_66",
+      "ps1_netemu_patch_unpack"
+    ],
+    "1": [
+      "tests_test_patch",
+      "tests_test_patch_rationale_1",
+      "tests_test_patch_rationale_19",
+      "tests_test_patch_synthetic_elf",
+      "tests_test_patch_test_fself_roundtrip",
+      "tests_test_patch_test_patch_refuses_unexpected_bytes",
+      "tests_test_patch_test_patches_change_only_target_words"
+    ],
+    "2": [
+      "ps1_netemu_patch_apply_patches",
+      "ps1_netemu_patch_patch",
+      "ps1_netemu_patch_rationale_119",
+      "ps1_netemu_patch_rationale_31",
+      "ps1_netemu_patch_va_to_off"
+    ],
+    "3": [
+      "skipif",
+      "tests_test_patch_test_real_file_only_five_words_differ"
+    ]
+  },
+  "cohesion": {
+    "0": 0.35714285714285715,
+    "1": 0.42857142857142855,
+    "2": 0.4,
+    "3": 1.0
+  },
+  "gods": [
+    {
+      "id": "ps1_netemu_patch_apply_patches",
+      "label": "apply_patches()",
+      "degree": 5
+    },
+    {
+      "id": "tests_test_patch_synthetic_elf",
+      "label": "synthetic_elf()",
+      "degree": 5
+    },
+    {
+      "id": "ps1_netemu_patch_unpack",
+      "label": "unpack()",
+      "degree": 4
+    },
+    {
+      "id": "ps1_netemu_patch_main",
+      "label": "main()",
+      "degree": 4
+    },
+    {
+      "id": "ps1_netemu_patch_patch",
+      "label": "Patch",
+      "degree": 3
+    },
+    {
+      "id": "ps1_netemu_patch_build_fself",
+      "label": "build_fself()",
+      "degree": 3
+    },
+    {
+      "id": "ps1_netemu_patch_ctr",
+      "label": "_ctr()",
+      "degree": 2
+    },
+    {
+      "id": "ps1_netemu_patch_va_to_off",
+      "label": "_va_to_off()",
+      "degree": 2
+    },
+    {
+      "id": "tests_test_patch_test_patches_change_only_target_words",
+      "label": "test_patches_change_only_target_words()",
+      "degree": 2
+    },
+    {
+      "id": "tests_test_patch_test_patch_refuses_unexpected_bytes",
+      "label": "test_patch_refuses_unexpected_bytes()",
+      "degree": 2
+    }
+  ],
+  "surprises": [
+    {
+      "source": "main()",
+      "target": "apply_patches()",
+      "source_files": [
+        "ps1_netemu_patch.py",
+        "ps1_netemu_patch.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "note": "Bridges community 2 \u2192 community 0"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}

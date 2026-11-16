@@ -128,11 +128,29 @@ def apply_patches(elf: bytes, patches: tuple[Patch, ...] = PATCHES) -> bytes:
     return bytes(out)
 
 
-def build_fself(elf: bytes, orig_self: bytes) -> bytes:
-    """Wrap `elf` in an unsigned SELF, reusing app info and control info of the original."""
+def control_blocks(control: bytes) -> dict[int, bytes]:
+    """Split SELF control info into {type: block}; each block starts with (type, size)."""
+    blocks, off = {}, 0
+    while off + 8 <= len(control):
+        typ, size = struct.unpack(">II", control[off:off + 8])
+        if size < 8 or off + size > len(control):
+            raise ValueError(f"bad control block at +0x{off:x}")
+        blocks[typ] = control[off:off + size]
+        off += size
+    return blocks
+
+
+def build_fself(elf: bytes, orig_self: bytes, minimal: bool = True) -> bytes:
+    """Wrap `elf` in an unsigned SELF, reusing the original app info.
+
+    `minimal` keeps only the digest control block (PSL1GHT layout, no SCE
+    version block); otherwise the original capability flags are copied too.
+    """
     app_info = orig_self[0x70:0x90]
-    sce_version = orig_self[0x390:0x3A0]
+    sce_version = b"" if minimal else orig_self[0x390:0x3A0]
     control = orig_self[0x3A0:0x410]
+    if minimal:
+        control = control_blocks(control)[2]  # digest block only; no capability flags
     ehdr = elf[:0x40]
     e_phoff, e_shoff = struct.unpack(">QQ", ehdr[0x20:0x30])
     phentsize, phnum = struct.unpack(">HH", ehdr[0x36:0x3A])
@@ -154,7 +172,7 @@ def build_fself(elf: bytes, orig_self: bytes) -> bytes:
 
     head = struct.pack(">4sIHHIQQ", b"SCE\0", 2, 0x8000, 1, end - 0x10, data_off, len(elf))
     head += struct.pack(">9Q", 3, app_off, elf_off, phdr_off, data_off + e_shoff,
-                        seg_off, ver_off, ctl_off, len(control))
+                        seg_off, ver_off if sce_version else 0, ctl_off, len(control))
     blob = bytearray(data_off)
     for off, chunk in ((0, head), (app_off, app_info), (elf_off, ehdr), (phdr_off, phdrs),
                        (seg_off, segs), (ver_off, sce_version), (ctl_off, control)):
