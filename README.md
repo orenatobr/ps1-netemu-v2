@@ -22,6 +22,17 @@ Tested on a CFW console with webMAN MOD 1.47.48, Legend of Legaia and Chrono Cro
 webMAN netemu option (the process is named `ps1_emu.self` but runs `ps1_netemu` code).
 PAL is not changed and not validated.
 
+## Known limitations
+
+- **Castlevania: Symphony of the Night keeps a thin black band at the top.** Static analysis of the draw path
+  (`0x1152a0` and `0x115c40`, shared by every game) shows the quad is correct: the vertices are
+  the `+0x1ac..+0x1b8` floats this patch computes (they overshoot the screen by 7% for that game), and
+  the texture coordinates span the whole declared display area (`+0x1bc`/`+0x1c0` = 253 x 238 texels).
+  So the band is not geometry. It is black pixels inside the area the game declares. Removing it needs a
+  per-frame scan of the frame content, which is not implemented, because the frame lives in RSX memory
+  that only the emulator can read. Games that fill their declared area (Legend of Legaia, Chrono Cross) are fine.
+- PAL, 480i modes and analog-requesting games are untested.
+
 ## Install
 
 ### Option 1: the package (recommended)
