@@ -16,7 +16,7 @@ It returns r3 = 1 when the card exists and NAME_VA holds its name, else 0 (no di
 failed open or write); then the hook puts NAME_VA in slot 1 (r30 and r28) and everything else follows the
 original code. A card is never touched when it already exists. A later disc of a multi-disc game (a path
 with "(Disc 2)" to "(Disc 9)") takes the serial of its "(Disc 1)" image when that file opens, so all the
-discs share one card; without it the disc's own serial is used.
+discs share one card; "[Disc 2]" and "(Disc 2 of 3)" work too. Without that file the disc's own serial is used.
 
 The functions called are the emulator's own: open 0x15532c (path, flags, &fd, 0, 0), lseek 0x14f9f4
 (fd, offset, whence, &pos), read 0x14f75c and write 0x14f7b4 (fd, buffer, size, &done), close 0x14f80c and
@@ -53,14 +53,18 @@ def program() -> list[tuple]:
         ("label", "copied"),
         ("mr", "r11", "r26"),
         ("label", "fnd"),
-        ("lbz", "r10", 0, "r11"), ("cmpwi", "r10", 0), ("beq", "noalt"), ("cmpwi", "r10", 0x28), ("bne", "fnext"),
+        ("lbz", "r10", 0, "r11"), ("cmpwi", "r10", 0), ("beq", "noalt"),
+        ("cmpwi", "r10", 0x28), ("beq", "open1"), ("cmpwi", "r10", 0x5B), ("bne", "fnext"),  # "(" or "["
+        ("label", "open1"),
     ]
     for k, ch in enumerate("Disc ", 1):
         p += [("lbz", "r12", k, "r11"), ("cmpwi", "r12", ord(ch)), ("bne", "fnext")]
     p += [
         ("lbz", "r12", 6, "r11"), ("cmpwi", "r12", 0x31), ("beq", "noalt"),
         ("cmpwi", "r12", 0x32), ("blt", "fnext"), ("cmpwi", "r12", 0x39), ("bgt", "fnext"),
-        ("lbz", "r12", 7, "r11"), ("cmpwi", "r12", 0x29), ("bne", "fnext"),
+        ("lbz", "r12", 7, "r11"), ("cmpwi", "r12", 0x29), ("beq", "close1"), ("cmpwi", "r12", 0x5D), ("beq", "close1"),
+        ("cmpwi", "r12", 0x20), ("bne", "fnext"),  # ")", "]" or the space of "(Disc 2 of 3)"
+        ("label", "close1"),
         ("li", "r12", 0x31), ("stb", "r12", 6, "r11"),
         ("mr", "r3", "r26"), ("li", "r4", 0), ("addi", "r5", "r1", FD), ("li", "r6", 0), ("li", "r7", 0),
         ("bl", OPEN), ("cmpwi", "r3", 0), ("beq", "opened"), ("b", "noalt"),

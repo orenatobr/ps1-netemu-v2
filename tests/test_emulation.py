@@ -722,3 +722,22 @@ def test_names_without_the_disc_pattern_keep_their_own_serial(cave_elf, name):
     fs = Fs({name: _disc((2352, 24), boot_line=b"BOOT = cdrom:\\SLUS_007.77;1\r\n")})
     cpu, _ = _hook(cave_elf, fs, disc_path=name)
     assert cpu.cstr(C.NAME_VA) == "SLUS-00777"
+
+
+@pytest.mark.parametrize("title,serials", [
+    ("Final Fantasy VII (USA) (Disc {})", {1: "SCUS_941.63", 2: "SCUS_941.64", 3: "SCUS_941.65"}),
+    ("Metal Gear Solid (USA) (Disc {}) (Rev 1)", {1: "SLUS_005.94", 2: "SLUS_005.95", 3: "SLUS_999.99"}),
+    ("Xenogears [Disc {}]", {1: "SLUS_006.64", 2: "SLUS_006.69", 3: "SLUS_000.01"}),
+    ("Vagrant Story (Disc {} of 3)", {1: "SLUS_010.40", 2: "SLUS_010.41", 3: "SLUS_010.42"}),
+])
+@pytest.mark.parametrize("disc", [1, 2, 3])
+def test_any_multi_disc_game_shares_one_card_not_just_one_title(cave_elf, title, serials, disc):
+    def boot(n):
+        return b"BOOT = cdrom:\\" + serials[n].encode() + b";1\r\n"
+
+    files = {"/dev_hdd0/PSXISO/" + title.format(n) + ".bin": _disc((2352, 24), boot_line=boot(n)) for n in (1, 2, 3)}
+    fs = Fs(files)
+    cpu, _ = _hook(cave_elf, fs, disc_path="/dev_hdd0/PSXISO/" + title.format(disc) + ".bin")
+    expected = serials[1].replace("_", "-").replace(".", "")
+    assert cpu.cstr(C.NAME_VA) == expected and not fs.fds
+    assert sum(1 for p in fs.files if p.endswith(".VM1")) == 1  # one card for the whole set
