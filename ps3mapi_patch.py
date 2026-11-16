@@ -5,6 +5,7 @@ ps1_emu.self but runs ps1_netemu code), then:
 
     python ps3mapi_patch.py 192.168.1.85            # apply
     python ps3mapi_patch.py 192.168.1.85 --revert   # restore
+    python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
 
 What it does:
   * analog mode on for the 8 pads;
@@ -22,6 +23,7 @@ import argparse
 import logging
 import re
 import struct
+import time
 import urllib.request
 
 logger = logging.getLogger(__name__)
@@ -108,10 +110,29 @@ def apply(host: str, revert: bool = False) -> None:
     logger.info("analog flag of %d pads = %d", PAD_COUNT, 0 if revert else 1)
 
 
+def watch(host: str, interval: float = 2.0) -> None:
+    """Patch each PS1 game as soon as it starts (a fresh process has the stock words)."""
+    logger.info("watching %s; start a PS1 game (Ctrl-C to stop)", host)
+    stock = CODE[-1][1]  # stock word of the last patch site
+    while True:
+        try:
+            pid = find_process(host)
+            if read_word(host, pid, CODE[-1][0]) == stock:
+                time.sleep(3)  # let the emulator finish initializing its pads
+                apply(host)
+        except (RuntimeError, OSError):
+            pass  # no emulator running yet, or the console is busy
+        time.sleep(interval)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("host")
     ap.add_argument("--revert", action="store_true")
+    ap.add_argument("--watch", action="store_true", help="patch every game that starts")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    apply(args.host, args.revert)
+    if args.watch:
+        watch(args.host)
+    else:
+        apply(args.host, args.revert)

@@ -33,6 +33,7 @@ webMAN netemu option the process is named `ps1_emu.self`), then:
 ```
 python ps3mapi_patch.py 192.168.1.85            # apply
 python ps3mapi_patch.py 192.168.1.85 --revert   # restore
+python ps3mapi_patch.py 192.168.1.85 --watch    # stay running and patch every game you start
 ```
 
 The overscan is adaptive, with no per-game value: the picture is shown in a 224-line
@@ -105,3 +106,16 @@ Legend of Legaia (USA), NTSC, PS1 ISO mounted by webMAN MOD 1.47.48 with the net
 (process `ps1_emu.self` running `ps1_netemu` code). Analog mode: confirmed on the TV. Overscan: geometry
 measured in memory; the last top-edge adjustment is not yet confirmed visually. PAL: untouched and
 unsupported. The repository is private, so downloads need the owner's login.
+
+## Why there is no working `.self`
+
+Three container strategies were tested on hardware:
+
+| Approach | Result |
+|----------|--------|
+| Unsigned SELF (fself), all original control flags | loads, black screen (even with no patch) |
+| fself with a minimal header | error `80010001` |
+| Stock SELF container, segments repacked at the same size | error `80010017` (integrity check) |
+
+The signature covers the section hashes, so a patched retail SELF cannot be re-signed
+without Sony's private key. Use `ps3mapi_patch.py --watch` instead.
