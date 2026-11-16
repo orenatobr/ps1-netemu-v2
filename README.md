@@ -19,9 +19,24 @@ Back up the stock file first, then copy the new one under the original name:
 /dev_flash/ps1emu/ps1_netemu.self   <-  ps1_netemu_v2.00.self (renamed)
 ```
 
-**Status: v2.00 shows a black screen on hardware** (emulator still responds, the
-PS3 menu is reachable). The cause is being isolated; do not install this build
-yet. The stock file restores normal behavior.
+**Status: the `.self` does not work on hardware.** Even an unpatched fself repack
+shows a black screen, and a minimal header fails with `80010001`: the console does
+not give an unsigned SELF the same privileges as the signed original. Use the
+live patcher below instead; it leaves the stock file untouched.
+
+## Live patch (recommended)
+
+With webMAN MOD (PS3MAPI), start a PS1 game that uses `ps1_netemu` (note: with the
+webMAN netemu option the process is named `ps1_emu.self`), then:
+
+```
+python ps3mapi_patch.py 192.168.1.85            # apply
+python ps3mapi_patch.py 192.168.1.85 --revert   # restore
+```
+
+It reads each patch site first and refuses to write unless the bytes are the stock
+ps1_netemu words. Nothing is written to disk; closing the game undoes it.
+The analog flag is written directly for the 8 pads because pad init already ran.
 
 ## What changed (5 instructions)
 
