@@ -49,8 +49,8 @@ class Patch:
 
 
 # Every change lives in ps3mapi_patch (single source of truth).
-OVERSCAN_VA = CAVE_VA + 0x200
-ANALOG_VA = CAVE_VA + 0x600
+OVERSCAN_VA = CAVE_VA + 0x800
+ANALOG_VA = CAVE_VA + 0xE00
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)

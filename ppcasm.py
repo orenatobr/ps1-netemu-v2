@@ -86,6 +86,14 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
             w = _b(tgt(a[0]) - pc, 0)
         elif m == "bl":
             w = _b(tgt(a[0]) - pc, 1)
+        elif m == "mulli":
+            w = (7 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | _i16(a[2])
+        elif m == "mullw":
+            w = (31 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (235 << 1)
+        elif m == "lwbrx":  # lwbrx rt,ra|0,rb: a word, byte reversed
+            w = (31 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (534 << 1)
+        elif m == "lhz":
+            w = (40 << 26) | (_r(a[0]) << 21) | (_r(a[2]) << 16) | _i16(a[1])
         elif m == "stwx":
             w = (31 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (151 << 1)
         elif m == "rlwinm":

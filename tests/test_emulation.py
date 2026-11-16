@@ -87,6 +87,12 @@ class Cpu:
                 self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 4)
             elif op == 34:  # lbz
                 self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 1)
+            elif op == 7:  # mulli
+                self.r[rt] = (self.r[ra] * _s16(w & 0xFFFF)) & M64
+            elif op == 38:  # stb
+                self.wr((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 1, self.r[rt] & 0xFF)
+            elif op == 40:  # lhz
+                self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 2)
             elif op == 15:  # lis
                 self.r[rt] = (self.ra0(ra) + (_s16(w & 0xFFFF) << 16)) & M64
             elif op == 24:  # ori (RA is the destination)
@@ -151,6 +157,11 @@ class Cpu:
                 xo = (w >> 1) & 0x3FF
                 if xo == 266:  # add
                     self.r[rt] = (self.r[ra] + self.r[rb]) & M64
+                elif xo == 235:  # mullw
+                    self.r[rt] = ((self.r[ra] & M32) * (self.r[rb] & M32)) & M32
+                elif xo == 534:  # lwbrx
+                    ea = (self.ra0(ra) + self.r[rb]) & M64
+                    self.r[rt] = int.from_bytes(self.rd(ea, 4).to_bytes(4, "big"), "little")
                 elif xo == 40:  # subf
                     self.r[rt] = (self.r[rb] - self.r[ra]) & M64
                 elif xo == 104:  # neg
@@ -480,3 +491,196 @@ def test_a_different_smaller_area_needs_its_own_hold(cave_elf):
     out = _frames(cave_elf, [a] * O.HOLD + [b] * (O.HOLD - 1) + [b])
     assert _same(out[O.HOLD + O.HOLD - 2], _reference(SOTN, 20, 227, 240))  # one short: still window a
     assert _same(out[-1], _reference(SOTN, 40, 201, 240))
+
+
+# ---- one memory card per game ----------------------------------------------------------------
+
+import cave_percard as C
+
+PATH_BUF = 0x2D6018  # where the emulator keeps the disc path (TOC slot -0x7fac)
+CARD_DIR = "/dev_hdd0/savedata/vmc/"
+
+
+def _blank_card() -> bytes:
+    data = bytearray(131072)
+    for i in range(1024):
+        f = bytearray(b"\xff" * 128) if 36 <= i <= 62 else bytearray(128)
+        if i in (0, 63):
+            f[0], f[1], f[127] = 0x4D, 0x43, 0x0E
+        elif 1 <= i <= 15:
+            f[0], f[8], f[9], f[127] = 0xA0, 0xFF, 0xFF, 0xA0
+        elif 16 <= i <= 35:
+            f[0:4], f[8], f[9] = b"\xff" * 4, 0xFF, 0xFF
+        data[128 * i:128 * i + 128] = f
+    return bytes(data)
+
+
+def _disc(layout, boot_line=b"BOOT = cdrom:\\SLUS_006.62;1\r\nTCB = 4\r\nEVENT = 10\r\nSTACK = 801FFF00\r\n", cnf=True):
+    """An ISO9660 image: volume descriptor at sector 16, root directory at 18, SYSTEM.CNF at 20."""
+    size, head = layout
+    sectors = {}
+    pvd = bytearray(2048)
+    pvd[0], pvd[1:6] = 1, b"CD001"
+    root = bytearray(34)
+    root[0], root[2:6], root[10:14], root[25] = 34, (18).to_bytes(4, "little"), (2048).to_bytes(4, "little"), 2
+    pvd[156:190] = root
+    sectors[16] = bytes(pvd)
+
+    def record(name: bytes, lba: int, length: int) -> bytes:
+        n = 33 + len(name) + (0 if len(name) % 2 else 1)
+        r = bytearray(n)
+        r[0], r[2:6], r[10:14], r[32] = n, lba.to_bytes(4, "little"), length.to_bytes(4, "little"), len(name)
+        r[33:33 + len(name)] = name
+        return bytes(r)
+
+    d = record(b"\0", 18, 2048) + record(b"\1", 18, 2048) + record(b"A.TXT;1", 19, 4)
+    if cnf:
+        d += record(b"SYSTEM.CNF;1", 20, len(boot_line))
+    d += record(b"ZZZ.BIN;1", 21, 4)
+    sectors[18] = d.ljust(2048, b"\0")
+    sectors[20] = boot_line.ljust(2048, b"\0")
+    img = bytearray(size * 24)
+    for lba, payload in sectors.items():
+        img[lba * size + head:lba * size + head + 2048] = payload
+    return bytes(img)
+
+
+class Fs:
+    """The emulator's file functions, backed by a dict of paths to bytes."""
+
+    def __init__(self, files: dict[str, bytes], fail_open: set[str] = frozenset()):
+        self.files = {k: bytearray(v) for k, v in files.items()}
+        self.fail_open, self.fds, self.log, self.next = set(fail_open), {}, [], 3
+
+    def mocks(self):
+        def op(c):
+            path, flags = c.cstr(c.r[3]), c.r[4]
+            self.log.append(("open", path, flags))
+            if path in self.fail_open or (path not in self.files and not flags & 0x200):
+                c.r[3] = 0x80010006
+                return
+            self.files.setdefault(path, bytearray())
+            self.fds[self.next] = [path, 0]
+            c.wr(c.r[5], 4, self.next)
+            self.next += 1
+            c.r[3] = 0
+
+        def seek(c):
+            fd = self.fds[c.r[3] & M32]
+            fd[1] = c.r[4]
+            c.wr(c.r[6], 8, fd[1])
+            c.r[3] = 0
+
+        def read(c):
+            fd = self.fds[c.r[3] & M32]
+            data = bytes(self.files[fd[0]][fd[1]:fd[1] + c.r[5]])
+            for i, b in enumerate(data):
+                c.mem[c.r[4] + i] = b
+            fd[1] += len(data)
+            c.wr(c.r[6], 8, len(data))
+            c.r[3] = 0
+
+        def write(c):
+            fd = self.fds[c.r[3] & M32]
+            data = bytes(c.byte(c.r[4] + i) for i in range(c.r[5]))
+            f = self.files[fd[0]]
+            f[fd[1]:fd[1] + len(data)] = data
+            fd[1] += len(data)
+            c.wr(c.r[6], 8, len(data))
+            c.r[3] = 0
+
+        def close(c):
+            self.log.append(("close", c.r[3] & M32))
+            self.fds.pop(c.r[3] & M32)
+            c.r[3] = 0
+
+        base = _mocks(set(), [])
+        base.update({C.OPEN: op, C.LSEEK: seek, C.READ: read, C.WRITE: write, C.CLOSE: close})
+        return base
+
+
+def _hook(elf, fs, disc_path="/dev_hdd0/PSXISO/Game.bin", slot1=None, slot2=None):
+    cpu = Cpu(elf)
+    cpu.mocks = fs.mocks()
+    cpu.r[1], cpu.r[2], cpu.r[28] = STACK, TOC, 0x11111111
+    saved = {i: 0x7000 + i for i in (14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 29, 31)}
+    for i, v in saved.items():
+        cpu.r[i] = v
+    for i, b in enumerate(disc_path.encode() + b"\0" if disc_path else b"\0"):
+        cpu.mem[PATH_BUF + i] = b
+    addr = NAMES
+    for reg, name in ((30, slot1), (27, slot2)):
+        if name is None:
+            cpu.r[reg] = 0
+            continue
+        cpu.r[reg] = addr
+        for i, b in enumerate(name.encode() + b"\0"):
+            cpu.mem[addr + i] = b
+        addr += 0x100
+    end = cpu.run(M.HOOK_VA, {M.MOVE_TARGET, M.STOCK_RESUME})
+    assert cpu.r[1] == STACK and all(cpu.r[i] == v for i, v in saved.items())  # nothing of main's is disturbed
+    return cpu, end
+
+
+@pytest.mark.parametrize("layout", [(2352, 24), (2352, 16), (2048, 0)])
+def test_each_game_gets_its_own_blank_card_named_after_its_serial(cave_elf, layout):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc(layout)})
+    cpu, end = _hook(cave_elf, fs)
+    card = CARD_DIR + "SLUS-00662.VM1"
+    assert cpu.r[30] == C.NAME_VA and cpu.cstr(C.NAME_VA) == "SLUS-00662" and cpu.r[28] == C.NAME_VA
+    assert bytes(fs.files[card]) == _blank_card()
+    assert end == M.STOCK_RESUME and not fs.fds  # the card is in slot 1 through the stock path; every file closed
+
+
+def test_an_existing_card_is_only_put_in_slot_1(cave_elf):
+    saves = bytes(range(256)) * 512
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24)), CARD_DIR + "SLUS-00662.VM1": saves})
+    cpu, _end = _hook(cave_elf, fs)
+    assert cpu.r[30] == C.NAME_VA and bytes(fs.files[CARD_DIR + "SLUS-00662.VM1"]) == saves
+    assert not any(k == "open" and f & 0x200 for k, _p, f in [e for e in fs.log if e[0] == "open"])
+
+
+@pytest.mark.parametrize("line,serial", [
+    (b"BOOT = cdrom:\\SLUS_006.62;1\r\n", "SLUS-00662"),
+    (b"boot=cdrom:SLES_019.07;1\n", "SLES-01907"),
+    (b"BOOT = CDROM:\\SCUS_941.63;1\r\nTCB = 4\r\n", "SCUS-94163"),
+    (b"BOOT = cdrom:/slps_012.34;1", "SLPS-01234"),
+])
+def test_the_serial_is_read_from_the_boot_line(cave_elf, line, serial):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24), boot_line=line)})
+    cpu, _ = _hook(cave_elf, fs)
+    assert cpu.cstr(C.NAME_VA) == serial and (CARD_DIR + serial + ".VM1") in fs.files
+
+
+@pytest.mark.parametrize("case", ["no path", "no disc", "no system.cnf", "no boot line", "open fails"])
+def test_when_the_serial_is_unknown_the_original_card_logic_runs(cave_elf, case):
+    disc = _disc((2352, 24), boot_line=b"TCB = 4\r\n") if case == "no boot line" else _disc((2352, 24), cnf=case != "no system.cnf")
+    files = {} if case == "no disc" else {"/dev_hdd0/PSXISO/Game.bin": disc}
+    fs = Fs(files, fail_open={"/dev_hdd0/PSXISO/Game.bin"} if case == "open fails" else set())
+    cpu, end = _hook(cave_elf, fs, disc_path="" if case == "no path" else "/dev_hdd0/PSXISO/Game.bin",
+                     slot1="Other", slot2=None)
+    assert end == M.STOCK_RESUME and cpu.r[28] == 0x11111111 and cpu.r[30] != C.NAME_VA and not fs.fds
+    assert not any(p.endswith(".VM1") for p in fs.files)  # no card was created
+
+
+def test_a_failed_card_write_does_not_change_slot_1(cave_elf):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24))}, fail_open=set())
+    orig = fs.mocks
+
+    def broken():
+        m = orig()
+        m[C.WRITE] = lambda c: setattr_r3(c)
+        return m
+
+    def setattr_r3(c):
+        c.r[3] = 0x80010005
+
+    fs.mocks = broken
+    cpu, _end = _hook(cave_elf, fs, slot1="Other")
+    assert cpu.r[30] != C.NAME_VA and not fs.fds
+
+
+def test_per_game_card_beats_a_card_in_slot_2_but_keeps_it_there(cave_elf):
+    fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24)), CARD_DIR + "Game2.VM1": b"x" * 10})
+    cpu, end = _hook(cave_elf, fs, slot1=None, slot2="Game2")
+    assert cpu.r[30] == C.NAME_VA and end == M.STOCK_RESUME and cpu.r[27] != 0  # slot 2 untouched

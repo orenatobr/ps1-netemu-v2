@@ -7,11 +7,14 @@ is used as is). If slot 2 holds a PS1 card and slot 1 is empty or holds somethin
 card, a missing file), slot 2's card becomes slot 1's through the emulator's own path at 0xb4124,
 which inserts r30 into slot 1 and clears slot 2. Every other case falls back to the stock code.
 
-The functions called are the emulator's own: strlen 0xa318c, sprintf 0xa5420, open 0x15532c,
+Before that, `percard` (cave_percard.py) gives every game its own card in slot 1, named after the game's
+serial, created when missing. The functions called are the emulator's own: strlen 0xa318c, sprintf 0xa5420, open 0x15532c,
 close 0x14f80c; the stock format "/dev_hdd0/savedata/vmc/%s.VM1" sits in TOC slot -0x7b04.
 """
 from __future__ import annotations
 
+from cave_percard import NAME_VA
+from cave_percard import program as _percard
 from ppcasm import assemble
 
 HOOK_VA, HOOK_STOCK = 0xB3B90, 0x2F9B0000  # cmpwi cr7,r27,0
@@ -26,6 +29,10 @@ def program(fmt_va: int) -> list[tuple]:
     hi, lo = (fmt_va >> 16) & 0xFFFF, fmt_va & 0xFFFF
     return [
         ("stdu", "r1", -MAIN_FRAME, "r1"),
+        # one card per game: when percard finds the serial, its card becomes slot 1
+        ("bl", "percard"), ("cmpwi", "r3", 0), ("beq", "noper"),
+        ("lis", "r30", (NAME_VA >> 16) & 0xFFFF), ("ori", "r30", "r30", NAME_VA & 0xFFFF), ("mr", "r28", "r30"),
+        ("label", "noper"),
         ("cmpwi", "r27", 0), ("beq", "stock"),
         ("clrldi", "r3", "r27", 32), ("lbz", "r0", 0, "r3"),
         ("cmpwi", "r0", 0), ("beq", "stock"),
@@ -58,6 +65,7 @@ def program(fmt_va: int) -> list[tuple]:
         ("label", "no"), ("li", "r3", 0),
         ("label", "done"),
         ("addi", "r1", "r1", EXISTS_FRAME), ("ld", "r0", 0x10, "r1"), ("mtlr", "r0"), ("blr",),
+        *_percard(),
     ]
 
 

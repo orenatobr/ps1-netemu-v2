@@ -21,15 +21,20 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    one, and stays as it is when a frame has no usable area, so scenes that alternate areas (the game's intro) do
    not make the picture jump. PAL, 480i and games without a usable draw area keep the stock behavior. The width is the
    emulator's own (an earlier version widened it, which was not requested, and it was reverted).
-3. **A PS1 memory card in slot 2 moves to slot 1 when slot 1 has no PS1 card.** The emulator receives the cards as
-   `argv[1]` (slot 1) and `argv[2]` (slot 2) into `xMcInsert`. A hook at `0xb3b90` jumps to new code placed in a 4 KB
-   extension of the text segment (`0x1a9380`). A card counts as PS1 when `/dev_hdd0/savedata/vmc/<name>.VM1` can be
-   opened (a name already ending in `.VM1` is used as is), so a PS2 card (`.VM2`) or a missing file never counts. If slot 2
-   holds a PS1 card and slot 1 is empty or holds something that is not a PS1 card, slot 2's card is inserted into
-   slot 1 through the emulator's own path at `0xb4124`, which also clears slot 2. Every other case runs the original
-   code. The new code calls the emulator's own `strlen`, `sprintf`, `open` and `close`; 14 scenarios (PS1, PS2, missing,
-   empty, NULL, names with and without extension, file handles closed) run it in a PowerPC interpreter with those four
-   functions stood in for. It has not run on a console yet.
+3. **One memory card per game, named after the game's serial, in slot 1.** A hook at `0xb3b90` (inside `xMcInsert`)
+   first calls `percard` (`cave_percard.py`), which opens the disc image whose path the emulator keeps in a global
+   buffer (copied from `argv[5]`), finds the ISO9660 volume descriptor in any of three layouts (raw 2352-byte
+   sectors with a 24 or 16 byte header, or 2048-byte sectors), reads `SYSTEM.CNF`, takes the executable name after
+   `cdrom:` (`SLUS_006.62;1`) and turns it into the serial `SLUS-00662` (underscore to hyphen, dot dropped, upper
+   case). It opens `/dev_hdd0/savedata/vmc/SLUS-00662.VM1`; if the file does not exist it writes a blank formatted
+   128 KB card (the same layout as any PS1 card: `MC` header, 15 free directory frames, 20 empty broken-sector frames,
+   `0xFF` filler frames, empty blocks); an existing card is only opened and closed, never rewritten. That card
+   becomes slot 1; slot 2 is untouched. If the serial cannot be found (no disc path, unknown format, no `BOOT` line,
+   a failed open or write) the original card logic runs, and so does the earlier rule: a PS1 card in slot 2 moves to
+   slot 1 when slot 1 has no PS1 card (`.VM1` file check, PS2 cards never count). Each disc of a multi-disc game has
+   its own serial, so it gets its own card. Saves kept in the old shared `PS1.VM1` stay there: assign it to slot 2 in
+   the emulator menu to copy them into a per-game card. 64 tests run the real emulator code in a PowerPC interpreter
+   with a simulated file system and synthetic discs; it has not run on a console yet.
 
 ## Known limitations
 
