@@ -98,3 +98,10 @@ info and control info.
 
 The binary is Sony's code with five instructions changed. Use it on your own
 console only.
+
+## Tested configuration
+
+Legend of Legaia (USA), NTSC, PS1 ISO mounted by webMAN MOD 1.47.48 with the netemu option
+(process `ps1_emu.self` running `ps1_netemu` code). Analog mode: confirmed on the TV. Overscan: geometry
+measured in memory; the last top-edge adjustment is not yet confirmed visually. PAL: untouched and
+unsupported. The repository is private, so downloads need the owner's login.
