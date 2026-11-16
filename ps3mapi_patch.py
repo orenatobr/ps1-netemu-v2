@@ -8,7 +8,6 @@ ps1_emu.self but runs ps1_netemu code), then:
     python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
 
 What it does:
-  * analog mode switches on when a game enters DualShock configuration (command 0x43);
   * vertical "overscan" like DuckStation (NTSC): the picture is shown in a window
     of 224 video lines starting at line 24, cropping what falls outside. Unlike a
     fixed window, when a game starts its display AFTER line 24 the window is
@@ -62,12 +61,6 @@ CODE = (
     (0x115890, 0xFC601E9C, 0xFD801E9C, "f12 = width, converted directly"),
     (0x11589C, 0xFD801818, 0xFDAD3B6E, "bottom overshoot = max(overshoot, 0): fill the screen"),
     (0x1158AC, 0xEC8D1028, 0xEC8D102A, "y1 = 1 + overshoot"),
-    # analog: a game that enters DualShock configuration (command 0x43, data byte 1) supports analog,
-    # so the pad flag (+0x9c) is set; the game's own 0x44 (set mode) still has the last word.
-    (0x0D6B7C, 0x381F00A0, 0x381F009C, "r0 = pad record + 0x9c (analog flag)"),
-    (0x0D6B80, 0x7C0007B4, 0x7F78012E, "stwx r27,r24,r0: analog flag = 1 (r27 is 1 on config enter)"),
-    (0x0D6B88, 0x812B0004, 0x812B0008, "lwz r9,8(r11): same +0xa4 field, base moved by 4"),
-    (0x0D6B98, 0x900B0004, 0x900B0008, "stw r0,8(r11): same +0xa4 field, base moved by 4"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from cave_analog import build as _analog_cave
 from cave_memcard import build as _memcard_cave
 from cave_overscan import build as _overscan_cave
 from ps3mapi_patch import CODE, CONSTANTS
@@ -49,14 +50,18 @@ class Patch:
 
 # Every change lives in ps3mapi_patch (single source of truth).
 OVERSCAN_VA = CAVE_VA + 0x200
+ANALOG_VA = CAVE_VA + 0x600
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
-assert _MEMCARD_BYTES <= OVERSCAN_VA - CAVE_VA and OVERSCAN_VA - CAVE_VA + _OVERSCAN_BYTES <= CAVE_SIZE
+_ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
+assert _MEMCARD_BYTES <= OVERSCAN_VA - CAVE_VA and _OVERSCAN_BYTES <= ANALOG_VA - OVERSCAN_VA
+assert ANALOG_VA - CAVE_VA + _ANALOG_BYTES <= CAVE_SIZE
 PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
     *(Patch(a, old, new, why) for a, old, new, why in _MEMCARD),
     *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
+    *(Patch(a, old, new, why) for a, old, new, why in _ANALOG),
 )
 
 

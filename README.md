@@ -2,12 +2,16 @@
 
 A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
 
-1. **Analog mode switches on when a game enters DualShock configuration (command `0x43`).** The change is
-   four words in the data-byte stage of that command (`0xd6b7c..0xd6b98`), checked in a PowerPC interpreter
-   against the original code: entering configuration sets the pad's analog flag, leaving it changes nothing, and the
-   game's own `0x44` (set mode) still has the last word. Digital-only games such as Castlevania never send `0x43`,
-   so they stay digital, and the menu toggle still works both ways. Two earlier approaches broke Castlevania and
-   were dropped: analog forced at boot, and analog whenever a game clocked extra pad bytes.
+1. **Analog mode and vibration switch on when a game talks DualShock.** A game that enters DualShock
+   configuration (command `0x43`, data byte 1) is one that supports analog sticks and motors. The hook at `0xd6b7c`
+   jumps to new code (`cave_analog.py`) that sets the pad's analog flag (record + 0x9c) and clears the vibration
+   disable flag (`X + 0x84`, X from TOC slot -0x7b60; 0 means on, as the actuator function at `0xeb2d8` reads it), then
+   redoes the displaced stock instructions. The pad starts digital (setting 28 reads 0), the game's own `0x44`
+   (set mode) and `0x4d` (motor mapping) still have the last word, and the menu toggle works both ways. On the
+   test console the vibration flag was already 0 (on) in a running game, so this only matters if it was switched
+   off in the menu. Digital-only games such as Castlevania never send `0x43` and stay digital (flags read 0 on the
+   console). Two earlier approaches broke Castlevania and were dropped: analog forced at boot, and analog whenever
+   a game clocked extra pad bytes. Checked in a PowerPC interpreter against the stock code.
 2. **DuckStation-style vertical overscan, cropped to the area the game really draws.** The stock formula shows a
    224-line window (video lines 24 to 248) of the display the game declares. On top of it, new code in the text
    segment extension reads the GPU packet buffer for the game's draw area (`GP0 E3/E4`, never decoded on the CPU side)

@@ -209,9 +209,11 @@ def elfs():
 
 
 BASE, PAD = 0x10000000, 0xD8  # fake pad-record area, stride of one record
+VIB_STRUCT = 0x10080000  # fake pad state struct (holds the vibration disable flag at +0x84)
+TOC = 0x1C3D30
 
 
-def _config_data_stage(elf: bytes, data_byte: int, analog: int, cfg_clear: int) -> dict:
+def _config_data_stage(elf: bytes, data_byte: int, analog: int, cfg_clear: int, vib: int = 1) -> dict:
     """Run the 0x43 data-byte stage for pad 1 (0xd6b5c up to its first branch out) and return the fields."""
     cpu = Cpu(elf)
     cpu.r[24], cpu.r[31], cpu.r[25] = BASE, PAD, 2
@@ -219,9 +221,13 @@ def _config_data_stage(elf: bytes, data_byte: int, analog: int, cfg_clear: int) 
     cpu.wr(BASE + PAD + 0x9C, 4, analog)
     cpu.wr(BASE + PAD + 0xA0, 4, 0)  # not in config mode yet
     cpu.wr(BASE + PAD + 0xA4, 4, cfg_clear)
+    cpu.r[2] = TOC
+    cpu.wr(TOC - 0x7B60, 4, VIB_STRUCT)  # the pad state struct the actuator function reads
+    cpu.wr(VIB_STRUCT + 0x84, 4, vib)  # vibration disable flag (0 = on)
     exit_pc = cpu.run(0xD6B5C, {0xD57B8, 0xD6DB0, 0xD6E48})
     rd = lambda off: cpu.rd(BASE + PAD + off, 4)
-    return {"analog": rd(0x9C), "config": rd(0xA0), "a4": rd(0xA4), "state": rd(0x8C), "exit": exit_pc}
+    return {"analog": rd(0x9C), "config": rd(0xA0), "a4": rd(0xA4), "state": rd(0x8C), "exit": exit_pc,
+            "vib": cpu.rd(VIB_STRUCT + 0x84, 4)}
 
 
 @pytest.mark.parametrize("analog", [0, 1])
@@ -230,8 +236,10 @@ def test_config_enter_switches_analog_on_and_keeps_the_rest(elfs, analog, cfg_cl
     stock, patched = elfs
     before = _config_data_stage(stock, 1, analog, cfg_clear)
     after = _config_data_stage(patched, 1, analog, cfg_clear)
-    assert after["analog"] == 1
-    assert {k: v for k, v in after.items() if k != "analog"} == {k: v for k, v in before.items() if k != "analog"}
+    assert after["analog"] == 1 and after["vib"] == 0  # analog on, vibration on
+    assert before["vib"] == 1  # the stock code never touches it
+    skip = ("analog", "vib")
+    assert {k: v for k, v in after.items() if k not in skip} == {k: v for k, v in before.items() if k not in skip}
     assert after["config"] == 1 and after["a4"] == 0
 
 
@@ -241,6 +249,7 @@ def test_config_exit_leaves_analog_alone(elfs, analog):
     before = _config_data_stage(stock, 0, analog, 5)
     after = _config_data_stage(patched, 0, analog, 5)
     assert after == before and after["analog"] == analog and after["config"] == 0
+    assert after["vib"] == 1  # leaving configuration does not switch vibration
 
 
 # ---- memory card cave -------------------------------------------------------------------------
