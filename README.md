@@ -31,10 +31,13 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
    `0xFF` filler frames, empty blocks); an existing card is only opened and closed, never rewritten. That card
    becomes slot 1; slot 2 is untouched. If the serial cannot be found (no disc path, unknown format, no `BOOT` line,
    a failed open or write) the original card logic runs, and so does the earlier rule: a PS1 card in slot 2 moves to
-   slot 1 when slot 1 has no PS1 card (`.VM1` file check, PS2 cards never count). Each disc of a multi-disc game has
-   its own serial, so it gets its own card. Saves kept in the old shared `PS1.VM1` stay there: assign it to slot 2 in
-   the emulator menu to copy them into a per-game card. 64 tests run the real emulator code in a PowerPC interpreter
-   with a simulated file system and synthetic discs; it has not run on a console yet.
+   slot 1 when slot 1 has no PS1 card (`.VM1` file check, PS2 cards never count). The discs of a multi-disc game share one card:
+   when the image path has `(Disc 2)` to `(Disc 9)` (the Redump naming), the code reads the serial from the `(Disc 1)`
+   image with the same name instead, so Chrono Cross disc 2 uses the card named after disc 1; without that file
+   it falls back to the disc's own serial. Other disc naming (`CD2`, `Disc2`) gets one card per disc. Saves kept in
+   the old shared `PS1.VM1` stay there: assign it to slot 2 in the emulator menu to copy them into a per-game
+   card. 73 tests run the real emulator code in a PowerPC interpreter with a simulated file system and synthetic
+   discs; it has not run on a console yet.
 
 ## Known limitations
 

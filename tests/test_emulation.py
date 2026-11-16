@@ -684,3 +684,41 @@ def test_per_game_card_beats_a_card_in_slot_2_but_keeps_it_there(cave_elf):
     fs = Fs({"/dev_hdd0/PSXISO/Game.bin": _disc((2352, 24)), CARD_DIR + "Game2.VM1": b"x" * 10})
     cpu, end = _hook(cave_elf, fs, slot1=None, slot2="Game2")
     assert cpu.r[30] == C.NAME_VA and end == M.STOCK_RESUME and cpu.r[27] != 0  # slot 2 untouched
+
+
+# ---- multi-disc games share the card of disc 1 -----------------------------------------------
+
+CC = "/dev_hdd0/PSXISO/Chrono Cross (USA, Canada) (Disc {}).bin"
+
+
+def _chrono(discs):
+    boot = {1: b"BOOT = cdrom:\\SLUS_010.41;1\r\n", 2: b"BOOT = cdrom:\\SLUS_011.08;1\r\n", 3: b"BOOT = cdrom:\\SLUS_099.99;1\r\n"}
+    return {CC.format(n): _disc((2352, 24), boot_line=boot[n]) for n in discs}
+
+
+@pytest.mark.parametrize("disc", [1, 2, 3])
+def test_every_disc_of_a_game_shares_the_card_of_disc_1(cave_elf, disc):
+    fs = Fs(_chrono([1, 2, 3]))
+    cpu, _ = _hook(cave_elf, fs, disc_path=CC.format(disc))
+    assert cpu.cstr(C.NAME_VA) == "SLUS-01041" and (CARD_DIR + "SLUS-01041.VM1") in fs.files
+    assert not any(p.endswith(".VM1") and "01041" not in p for p in fs.files) and not fs.fds
+
+
+def test_a_later_disc_without_disc_1_uses_its_own_serial(cave_elf):
+    fs = Fs(_chrono([2]))
+    cpu, _ = _hook(cave_elf, fs, disc_path=CC.format(2))
+    assert cpu.cstr(C.NAME_VA) == "SLUS-01108" and not fs.fds
+
+
+def test_the_emulators_own_path_buffer_is_left_alone(cave_elf):
+    fs = Fs(_chrono([1, 2]))
+    cpu, _ = _hook(cave_elf, fs, disc_path=CC.format(2))
+    assert cpu.cstr(PATH_BUF) == CC.format(2)
+
+
+@pytest.mark.parametrize("name", ["/dev_hdd0/PSXISO/Game Disc2.bin", "/dev_hdd0/PSXISO/Game (Disc A).bin",
+                                  "/dev_hdd0/PSXISO/Game (Disc 2.bin", "/dev_hdd0/PSXISO/Game (CD 2).bin"])
+def test_names_without_the_disc_pattern_keep_their_own_serial(cave_elf, name):
+    fs = Fs({name: _disc((2352, 24), boot_line=b"BOOT = cdrom:\\SLUS_007.77;1\r\n")})
+    cpu, _ = _hook(cave_elf, fs, disc_path=name)
+    assert cpu.cstr(C.NAME_VA) == "SLUS-00777"

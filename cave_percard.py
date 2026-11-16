@@ -14,8 +14,9 @@
 
 It returns r3 = 1 when the card exists and NAME_VA holds its name, else 0 (no disc path, unknown disc, a
 failed open or write); then the hook puts NAME_VA in slot 1 (r30 and r28) and everything else follows the
-original code. A card is never touched when it already exists. Multi-disc games have one card per disc
-because each disc has its own serial.
+original code. A card is never touched when it already exists. A later disc of a multi-disc game (a path
+with "(Disc 2)" to "(Disc 9)") takes the serial of its "(Disc 1)" image when that file opens, so all the
+discs share one card; without it the disc's own serial is used.
 
 The functions called are the emulator's own: open 0x15532c (path, flags, &fd, 0, 0), lseek 0x14f9f4
 (fd, offset, whence, &pos), read 0x14f75c and write 0x14f7b4 (fd, buffer, size, &done), close 0x14f80c and
@@ -27,9 +28,9 @@ OPEN, LSEEK, READ, WRITE, CLOSE, SPRINTF = 0x15532C, 0x14F9F4, 0x14F75C, 0x14F7B
 PATH_TOC, FMT_TOC = -0x7FAC, -0x7B04
 NAME_VA = 0x1BE780  # 32 free bytes in the writable data segment
 O_CREAT_RDWR = 0x202
-FRAME = 0xB80
+FRAME = 0xC10
 SAVE = 0xB00  # r20..r26 are saved at SAVE + 8 * k
-FD, DONE, PATH, SECTOR, CARD = 0x70, 0x78, 0xC0, 0x200, 0xA00
+FD, DONE, PATH, SECTOR, CARD, DISCPATH = 0x70, 0x78, 0xC0, 0x200, 0xA00, 0xB80  # DISCPATH: 0x80 bytes
 
 
 
@@ -41,9 +42,35 @@ def program() -> list[tuple]:
     ]
     p += [("std", f"r{20 + k}", SAVE + 8 * k, "r1") for k in range(7)]
     p += [
-        ("lwz", "r3", PATH_TOC, "r2"), ("lbz", "r0", 0, "r3"), ("cmpwi", "r0", 0), ("beq", "fail"),
+        ("lwz", "r25", PATH_TOC, "r2"), ("lbz", "r0", 0, "r25"), ("cmpwi", "r0", 0), ("beq", "fail"),
+        # a later disc of a multi-disc game ("(Disc 2)" and up) uses the serial of "(Disc 1)", so every disc
+        # shares one card; the path is copied (the emulator's own buffer is left alone) and the digit changed
+        ("addi", "r26", "r1", DISCPATH), ("li", "r9", 0),
+        ("label", "cpy0"),
+        ("add", "r11", "r25", "r9"), ("lbz", "r10", 0, "r11"), ("add", "r12", "r26", "r9"), ("stb", "r10", 0, "r12"),
+        ("cmpwi", "r10", 0), ("beq", "copied"), ("addi", "r9", "r9", 1), ("cmpwi", "r9", 0x7E), ("blt", "cpy0"),
+        ("b", "noalt"),
+        ("label", "copied"),
+        ("mr", "r11", "r26"),
+        ("label", "fnd"),
+        ("lbz", "r10", 0, "r11"), ("cmpwi", "r10", 0), ("beq", "noalt"), ("cmpwi", "r10", 0x28), ("bne", "fnext"),
+    ]
+    for k, ch in enumerate("Disc ", 1):
+        p += [("lbz", "r12", k, "r11"), ("cmpwi", "r12", ord(ch)), ("bne", "fnext")]
+    p += [
+        ("lbz", "r12", 6, "r11"), ("cmpwi", "r12", 0x31), ("beq", "noalt"),
+        ("cmpwi", "r12", 0x32), ("blt", "fnext"), ("cmpwi", "r12", 0x39), ("bgt", "fnext"),
+        ("lbz", "r12", 7, "r11"), ("cmpwi", "r12", 0x29), ("bne", "fnext"),
+        ("li", "r12", 0x31), ("stb", "r12", 6, "r11"),
+        ("mr", "r3", "r26"), ("li", "r4", 0), ("addi", "r5", "r1", FD), ("li", "r6", 0), ("li", "r7", 0),
+        ("bl", OPEN), ("cmpwi", "r3", 0), ("beq", "opened"), ("b", "noalt"),
+        ("label", "fnext"),
+        ("addi", "r11", "r11", 1), ("b", "fnd"),
+        ("label", "noalt"),
+        ("mr", "r3", "r25"),
         ("li", "r4", 0), ("addi", "r5", "r1", FD), ("li", "r6", 0), ("li", "r7", 0), ("bl", OPEN),
         ("cmpwi", "r3", 0), ("bne", "fail"),
+        ("label", "opened"),
         ("lwz", "r20", FD, "r1"), ("addi", "r23", "r1", SECTOR),
         # the volume descriptor, in one of three layouts
         ("li", "r21", 2352), ("li", "r22", 24), ("bl", "hdr"), ("cmpwi", "r3", 0), ("beq", "lay"),
