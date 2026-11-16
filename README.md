@@ -1,6 +1,6 @@
 # ps1_netemu v2.00
 
-A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
+A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
 
 1. **Analog mode switches on when a game enters DualShock configuration (command `0x43`).** The change is
    four words in the data-byte stage of that command (`0xd6b7c..0xd6b98`), checked in a PowerPC interpreter
@@ -21,6 +21,16 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 Tested on a CFW console with webMAN MOD 1.47.48, Legend of Legaia and Chrono Cross (NTSC), using the
 webMAN netemu option (the process is named `ps1_emu.self` but runs `ps1_netemu` code).
 PAL is not changed and not validated.
+
+3. **A PS1 memory card in slot 2 moves to slot 1 when slot 1 has no PS1 card.** The emulator receives the cards as
+   `argv[1]` (slot 1) and `argv[2]` (slot 2) into `xMcInsert`. A hook at `0xb3b90` jumps to new code placed in a 4 KB
+   extension of the text segment (`0x1a9380`). A card counts as PS1 when `/dev_hdd0/savedata/vmc/<name>.VM1` can be
+   opened (a name already ending in `.VM1` is used as is), so a PS2 card (`.VM2`) or a missing file never counts. If slot 2
+   holds a PS1 card and slot 1 is empty or holds something that is not a PS1 card, slot 2's card is inserted into
+   slot 1 through the emulator's own path at `0xb4124`, which also clears slot 2. Every other case runs the original
+   code. The new code calls the emulator's own `strlen`, `sprintf`, `open` and `close`; 14 scenarios (PS1, PS2, missing,
+   empty, NULL, names with and without extension, file handles closed) run it in a PowerPC interpreter with those four
+   functions stood in for. It has not run on a console yet.
 
 ## Known limitations
 
@@ -46,15 +56,6 @@ PAL is not changed and not validated.
   "Vibration Function" setting applies to it. A game that never sends these commands cannot be told apart from a
   digital-only game, and two attempts to guess (analog forced at boot, analog when the game clocks extra bytes)
   broke Castlevania: Symphony of the Night, so neither is shipped.
-- **Memory card in slot 1: not implemented, with a concrete blocker.** The cards come as `argv[1]` (slot 1) and
-  `argv[2]` (slot 2, NULL when absent) into `xMcInsert` (`0xb3a..`, insert helper `0xec5d0`). A correct move needs
-  to know whether each card is a PS1 card (`.VM1`) or a PS2 card (`.VM2`, "Sony PS2 Memory Card Format", checked
-  asynchronously at `0x141cb4`), which means a file check (`stat` on `/dev_hdd0/savedata/vmc/<name>.VM1`) plus the
-  null and empty-string handling of `argv[2]`: roughly 45 instructions. The binary has no safe space for that (zero
-  runs are ELF header fields and data tables, no alignment `nop`s). The only free memory is the 0x6c98-byte tail of
-  the last text page (`0x1a9368` to `0x1b0000`), which would need the text segment's `p_filesz` and the SELF section
-  sizes changed. That alters the container layout, cannot be proven without the console, and a mistake stops every game
-  from starting, so it is not shipped. The in-game "Assign Slots" menu does the move by hand.
 - PAL, 480i modes and analog-aware games are untested.
 
 ## Install

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from cave_memcard import build as _memcard_cave
 from ps3mapi_patch import CODE, CONSTANTS
 
 logger = logging.getLogger(__name__)
@@ -46,9 +47,12 @@ class Patch:
 
 
 # Every change lives in ps3mapi_patch (single source of truth).
+_MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
+assert _MEMCARD_BYTES <= CAVE_SIZE
 PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
+    *(Patch(a, old, new, why) for a, old, new, why in _MEMCARD),
 )
 
 

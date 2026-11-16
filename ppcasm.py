@@ -1,0 +1,97 @@
+"""A tiny PowerPC assembler: just the instructions the code cave needs, with labels.
+
+`assemble(base, lines)` takes a list of `(mnemonic, *operands)` tuples and `("label", name)` markers and
+returns the 32-bit words. Branch targets are labels or absolute addresses. Anything else raises.
+"""
+from __future__ import annotations
+
+REG = {f"r{i}": i for i in range(32)}
+
+
+def _r(x: str) -> int:
+    return REG[x]
+
+
+def _i16(v: int) -> int:
+    if not -0x8000 <= v <= 0xFFFF:
+        raise ValueError(f"immediate {v} does not fit 16 bits")
+    return v & 0xFFFF
+
+
+def _bc(bo: int, bi: int, disp: int) -> int:
+    if disp % 4 or not -0x8000 <= disp < 0x8000:
+        raise ValueError(f"conditional branch displacement {disp}")
+    return (16 << 26) | (bo << 21) | (bi << 16) | (disp & 0xFFFC)
+
+
+def _b(disp: int, link: int) -> int:
+    if disp % 4 or not -(1 << 25) <= disp < (1 << 25):
+        raise ValueError(f"branch displacement {disp}")
+    return (18 << 26) | (disp & 0x03FFFFFC) | link
+
+
+CONDS = {"beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28)}  # all on cr7
+
+
+def assemble(base: int, lines: list[tuple]) -> list[int]:
+    labels: dict[str, int] = {}
+    pc = base
+    for ln in lines:
+        if ln[0] == "label":
+            labels[ln[1]] = pc
+        else:
+            pc += 4
+    out: list[int] = []
+    pc = base
+    for ln in lines:
+        m, *a = ln
+        if m == "label":
+            continue
+        tgt = lambda x: labels[x] if isinstance(x, str) else x
+        if m == "li":
+            w = (14 << 26) | (_r(a[0]) << 21) | _i16(a[1])
+        elif m == "lis":
+            w = (15 << 26) | (_r(a[0]) << 21) | _i16(a[1])
+        elif m == "addi":
+            w = (14 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | _i16(a[2])
+        elif m == "ori":
+            w = (24 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | _i16(a[2])
+        elif m == "mr":
+            w = (31 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | (_r(a[1]) << 11) | (444 << 1)
+        elif m == "add":
+            w = (31 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (266 << 1)
+        elif m == "cmpwi":
+            w = (11 << 26) | (7 << 23) | (_r(a[0]) << 16) | _i16(a[1])
+        elif m == "cmplwi":
+            w = (10 << 26) | (7 << 23) | (_r(a[0]) << 16) | _i16(a[1])
+        elif m == "cmpw":
+            w = (31 << 26) | (7 << 23) | (_r(a[0]) << 16) | (_r(a[1]) << 11)
+        elif m in ("lbz", "lwz", "stw", "stb"):
+            op = {"lwz": 32, "lbz": 34, "stw": 36, "stb": 38}[m]
+            w = (op << 26) | (_r(a[0]) << 21) | (_r(a[2]) << 16) | _i16(a[1])
+        elif m in ("std", "stdu", "ld"):
+            if a[1] % 4:
+                raise ValueError("ds-form displacement must be a multiple of 4")
+            op, low = {"std": (62, 0), "stdu": (62, 1), "ld": (58, 0)}[m]
+            w = (op << 26) | (_r(a[0]) << 21) | (_r(a[2]) << 16) | (a[1] & 0xFFFC) | low
+        elif m == "clrldi":
+            n = a[2]
+            w = (30 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | ((n & 31) << 6) | (((n >> 5) & 1) << 5)
+        elif m in CONDS:
+            bo, bi = CONDS[m]
+            w = _bc(bo, bi, tgt(a[0]) - pc)
+        elif m == "b":
+            w = _b(tgt(a[0]) - pc, 0)
+        elif m == "bl":
+            w = _b(tgt(a[0]) - pc, 1)
+        elif m == "mflr":
+            w = 0x7C0802A6 | (_r(a[0]) << 21)
+        elif m == "mtlr":
+            w = 0x7C0803A6 | (_r(a[0]) << 21)
+        elif m == "blr":
+            w = 0x4E800020
+        else:
+            raise ValueError(f"unsupported mnemonic {m}")
+        out.append(w)
+        pc += 4
+    return out

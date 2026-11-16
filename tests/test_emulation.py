@@ -37,13 +37,29 @@ class Cpu:
         self.r = [0] * 32
         self.cr = [(0, 0, 0)] * 8
         self.mem: dict[int, int] = {}
+        self.lr = 0
+        self.mocks: dict[int, object] = {}  # va -> python stand-in for a called function
 
     def code(self, pc: int) -> int:
         off = P._va_to_off(self.elf, pc)
         return struct.unpack(">I", self.elf[off:off + 4])[0]
 
+    def byte(self, addr: int) -> int:
+        if addr in self.mem:
+            return self.mem[addr]
+        try:
+            return self.elf[P._va_to_off(self.elf, addr)]  # constants and TOC slots live in the ELF image
+        except ValueError:
+            return 0
+
     def rd(self, addr: int, n: int) -> int:
-        return int.from_bytes(bytes(self.mem.get(addr + i, 0) for i in range(n)), "big")
+        return int.from_bytes(bytes(self.byte(addr + i) for i in range(n)), "big")
+
+    def cstr(self, addr: int) -> str:
+        out = bytearray()
+        while self.byte(addr + len(out)):
+            out.append(self.byte(addr + len(out)))
+        return out.decode()
 
     def wr(self, addr: int, n: int, val: int) -> None:
         for i, b in enumerate(val.to_bytes(n, "big")):
@@ -66,6 +82,20 @@ class Cpu:
                 self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 4)
             elif op == 34:  # lbz
                 self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 1)
+            elif op == 15:  # lis
+                self.r[rt] = (self.ra0(ra) + (_s16(w & 0xFFFF) << 16)) & M64
+            elif op == 24:  # ori (RA is the destination)
+                self.r[ra] = self.r[rt] | (w & 0xFFFF)
+            elif op == 62 and w & 3 in (0, 1):  # std / stdu
+                ea = ((self.ra0(ra) if w & 3 == 0 else self.r[ra]) + _s16(w & 0xFFFC)) & M64
+                self.wr(ea, 8, self.r[rt])
+                if w & 3 == 1:
+                    self.r[ra] = ea
+            elif op == 58 and w & 3 == 0:  # ld
+                self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFC)) & M64, 8)
+            elif op == 10:  # cmplwi
+                a, b = self.r[ra] & M32, w & 0xFFFF
+                self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
             elif op == 36:  # stw
                 self.wr((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 4, self.r[rt] & M32)
             elif op == 30 and (w >> 2) & 7 == 0:  # rldicl
@@ -82,6 +112,15 @@ class Cpu:
                     self.r[ra] = _s32(self.r[rt]) & M64
                 elif xo == 23:  # lwzx
                     self.r[rt] = self.rd((self.ra0(ra) + self.r[rb]) & M64, 4)
+                elif xo == 444:  # or (mr)
+                    self.r[ra] = self.r[rt] | self.r[rb]
+                elif xo == 0:  # cmpw
+                    a, b = _s32(self.r[ra]), _s32(self.r[rb])
+                    self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
+                elif xo == 339:  # mflr
+                    self.r[rt] = self.lr
+                elif xo == 467:  # mtlr
+                    self.lr = self.r[rt]
                 elif xo == 151:  # stwx
                     self.wr((self.ra0(ra) + self.r[rb]) & M64, 4, self.r[rt] & M32)
                 else:
@@ -97,9 +136,19 @@ class Cpu:
                     raise NotImplementedError(f"{pc:#x}: bo {bo}")
                 if taken:
                     nxt = pc + _s16(w & 0xFFFC)
-            elif op == 18:  # b
+            elif op == 18:  # b / bl
                 li = w & 0x03FFFFFC
-                nxt = pc + (li - (1 << 26) if li & (1 << 25) else li)
+                target = pc + (li - (1 << 26) if li & (1 << 25) else li)
+                if w & 1:
+                    self.lr = pc + 4
+                if target in self.mocks:  # a call into emulator code that is stood in for
+                    self.mocks[target](self)
+                    for reg in range(4, 13):
+                        self.r[reg] = 0xDEAD0000 + reg  # volatile registers are clobbered by a call
+                else:
+                    nxt = target
+            elif w == 0x4E800020:  # blr
+                nxt = self.lr
             else:
                 raise NotImplementedError(f"{pc:#x}: opcode {op} in {w:08x}")
             pc = nxt
@@ -109,7 +158,7 @@ class Cpu:
 @pytest.fixture(scope="module")
 def elfs():
     stock = P.unpack(Path(os.environ["PS1_NETEMU_SELF"]).read_bytes())
-    return stock, P.apply_patches(stock)
+    return stock, P.apply_patches(P.extend_text(stock))
 
 
 BASE, PAD = 0x10000000, 0xD8  # fake pad-record area, stride of one record
@@ -145,3 +194,96 @@ def test_config_exit_leaves_analog_alone(elfs, analog):
     before = _config_data_stage(stock, 0, analog, 5)
     after = _config_data_stage(patched, 0, analog, 5)
     assert after == before and after["analog"] == analog and after["config"] == 0
+
+
+# ---- memory card cave -------------------------------------------------------------------------
+
+import cave_memcard as M
+
+STACK, NAMES, TOC = 0x7000000, 0x20000000, 0x1C3D30
+VMC = "/dev_hdd0/savedata/vmc/"
+
+
+@pytest.fixture(scope="module")
+def cave_elf():
+    stock = P.unpack(Path(os.environ["PS1_NETEMU_SELF"]).read_bytes())
+    return P.apply_patches(P.extend_text(stock))
+
+
+def _mocks(files: set[str], log: list):
+    def strlen(c):
+        c.r[3] = len(c.cstr(c.r[3]))
+
+    def sprintf(c):
+        text = c.cstr(c.r[4]).replace("%s", c.cstr(c.r[5]))
+        for i, b in enumerate(text.encode() + b"\0"):
+            c.mem[c.r[3] + i] = b
+        c.r[3] = len(text)
+
+    def fsopen(c):
+        path = c.cstr(c.r[3])
+        log.append(("open", path))
+        if path in files:
+            c.wr(c.r[5], 4, 3)
+            c.r[3] = 0
+        else:
+            c.r[3] = 0x80010006
+
+    def fsclose(c):
+        log.append(("close", c.r[3]))
+        c.r[3] = 0
+
+    return {M.STRLEN: strlen, M.SPRINTF: sprintf, M.FSOPEN: fsopen, M.FSCLOSE: fsclose}
+
+
+def _slots(elf: bytes, slot1, slot2, files: set[str]):
+    """Run the hook from 0xb3b90 as xMcInsert reaches it (r30 = slot 1 name or 0, r27 = slot 2 name or 0)."""
+    cpu, log = Cpu(elf), []
+    cpu.mocks = _mocks(files, log)
+    cpu.r[1], cpu.r[2], cpu.r[28] = STACK, TOC, 0x11111111
+    addr = NAMES
+    for reg, name in ((30, slot1), (27, slot2)):
+        if name is None:
+            cpu.r[reg] = 0
+            continue
+        cpu.r[reg] = addr
+        for i, b in enumerate(name.encode() + b"\0"):
+            cpu.mem[addr + i] = b
+        addr += 0x100
+    s1, s2 = cpu.r[30], cpu.r[27]
+    end = cpu.run(M.HOOK_VA, {M.MOVE_TARGET, M.STOCK_RESUME})
+    return cpu, end, s1, s2, log
+
+
+CARD = {VMC + "Game.VM1", VMC + "Other.VM1"}
+
+
+@pytest.mark.parametrize("slot1", [None, "", "Pad.VM2", "Missing", "Pad.VM2.VM1"])
+def test_ps1_card_in_slot_2_moves_to_slot_1_when_slot_1_has_no_ps1_card(cave_elf, slot1):
+    cpu, end, _s1, s2, _ = _slots(cave_elf, slot1, "Game", CARD)
+    assert end == M.MOVE_TARGET
+    assert cpu.r[30] == s2 and cpu.r[28] == s2 and cpu.r[1] == STACK
+
+
+def test_name_that_already_ends_in_vm1_is_used_as_is(cave_elf):
+    cpu, end, _s1, s2, log = _slots(cave_elf, None, "Game.VM1", CARD)
+    assert end == M.MOVE_TARGET and cpu.r[30] == s2
+    assert ("open", VMC + "Game.VM1") in log and ("close", 3) in log
+
+
+@pytest.mark.parametrize("slot1", ["Other", "Other.VM1"])
+def test_valid_ps1_card_in_slot_1_stays(cave_elf, slot1):
+    cpu, end, s1, _s2, _ = _slots(cave_elf, slot1, "Game", CARD)
+    assert end == M.STOCK_RESUME and cpu.r[30] == s1 and cpu.r[28] == 0x11111111 and cpu.r[1] == STACK
+
+
+@pytest.mark.parametrize("slot2", [None, "", "Gone", "Pad.VM2", "Pad.VM2.VM1"])
+def test_no_ps1_card_in_slot_2_means_stock_behavior(cave_elf, slot2):
+    cpu, end, s1, s2, _ = _slots(cave_elf, None, slot2, CARD)
+    assert end == M.STOCK_RESUME and cpu.r[30] == s1 and cpu.r[27] == s2 and cpu.r[28] == 0x11111111
+    assert cpu.cr[7][2] == int(s2 == 0) and cpu.r[1] == STACK  # cr7 carries the displaced cmpwi r27,0
+
+
+def test_every_probe_closes_the_file_it_opened(cave_elf):
+    _cpu, _end, _s1, _s2, log = _slots(cave_elf, "Other", "Game", CARD)
+    assert [k for k, _ in log].count("open") == [k for k, _ in log].count("close") == 2
