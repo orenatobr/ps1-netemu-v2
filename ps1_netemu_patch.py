@@ -1,9 +1,9 @@
 """Build ps1_netemu_v2.00.self from a stock ps1_netemu.self.
 
-The stock SELF container (header, metadata, signature) is kept byte for byte.
-Only the encrypted segment data changes: each segment is decrypted, patched,
-recompressed to the SAME stored size (zlib, padded with empty stored blocks) and
-encrypted again with the original keys, so no offset or size in the metadata moves.
+The stock SELF container is kept: header, offsets and sizes do not move. Each segment
+is decrypted, patched, recompressed to the SAME stored size (zlib, padded with empty
+stored blocks) and encrypted again with the original keys. The section HMAC-SHA1s and
+the ELF SHA-1 are recomputed; the ECDSA signature is the only thing left stale.
 
 Usage:
     python ps1_netemu_patch.py INPUT.self OUTPUT.self
@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import struct
 import sys
@@ -28,6 +29,8 @@ APP_ERK = bytes.fromhex("CFF025375BA0079226BE01F4A31F346D79F62CFB643CA910E16CF60
 APP_RIV = bytes.fromhex("FD40664E2EBBA01BF359B0DCDF543DA4")
 EXPECTED_KEY_REVISION = 0x1C
 EMPTY_STORED_BLOCK = b"\x00\x00\x00\xff\xff"  # non-final, zero-length deflate block
+CONTROL_OFF = 0x3A0  # control info; its last block holds the SHA-1 of the whole ELF
+ELF_DIGEST_OFF = CONTROL_OFF + 0x30 + 0x10 + 0x14  # type-1 block (0x30) + header (0x10) + magic (0x14)
 
 
 @dataclass(frozen=True)
@@ -69,10 +72,28 @@ class Section:
     compressed: bool
     key: bytes
     iv: bytes
+    hash_pos: int  # where this section's HMAC-SHA1 sits in the decrypted metadata blob
+    hmac_key: bytes
+
+
+@dataclass(frozen=True)
+class Metadata:
+    """The decrypted metadata blob and what is needed to encrypt it back in place."""
+
+    key: bytes
+    iv: bytes
+    blob: bytes
+    file_off: int
 
 
 def parse_sections(d: bytes) -> tuple[list[Section], bytes, int]:
     """Return the segment sections, the program headers and e_phoff of a retail SELF."""
+    sections, phdrs, e_phoff, _ = parse_all(d)
+    return sections, phdrs, e_phoff
+
+
+def parse_all(d: bytes) -> tuple[list[Section], bytes, int, Metadata]:
+    """Like `parse_sections`, plus the decrypted metadata."""
     magic, _ver, key_rev, hdr_type, meta_off, hdr_len, _ = struct.unpack(">4sIHHIQQ", d[:32])
     if magic != b"SCE\0" or hdr_type != 1:
         raise ValueError("not a SELF")
@@ -86,14 +107,18 @@ def parse_sections(d: bytes) -> tuple[list[Section], bytes, int]:
     blob = _ctr(info[0:16], info[32:48], d[meta_off + 0x60:hdr_len])
     nsec, nkeys = struct.unpack(">II", blob[0x0C:0x14])
     keys = [blob[0x20 + nsec * 0x30 + 16 * i:][:16] for i in range(nkeys)]
+    keys_off = 0x20 + nsec * 0x30
     sections = []
     for i in range(nsec):
-        off, size, typ, idx, _h, _s, enc, kidx, iidx, comp = struct.unpack(
+        off, size, typ, idx, _h, sha_idx, enc, kidx, iidx, comp = struct.unpack(
             ">QQ8I", blob[0x20 + i * 0x30:0x20 + (i + 1) * 0x30])
         if typ == 2:  # 2 = segment data
-            sections.append(Section(off, size, idx, enc == 3, comp == 2,
-                                    keys[kidx] if enc == 3 else b"", keys[iidx] if enc == 3 else b""))
-    return sections, d[phdr_off:phdr_off + phnum * phentsize], e_phoff
+            sections.append(Section(
+                off, size, idx, enc == 3, comp == 2,
+                keys[kidx] if enc == 3 else b"", keys[iidx] if enc == 3 else b"",
+                keys_off + 16 * sha_idx, b"".join(keys[sha_idx + 2:sha_idx + 6])))
+    meta = Metadata(info[0:16], info[32:48], blob, meta_off + 0x60)
+    return sections, d[phdr_off:phdr_off + phnum * phentsize], e_phoff, meta
 
 
 def _phdr(phdrs: bytes, index: int) -> tuple[int, int]:
@@ -172,9 +197,14 @@ def deflate_to_size(data: bytes, size: int) -> bytes:
 
 
 def repack(orig_self: bytes, patched_elf: bytes) -> bytes:
-    """Write the patched segments back into the stock SELF, keeping its layout."""
-    sections, phdrs, _ = parse_sections(orig_self)
+    """Write the patched segments back into the stock SELF, keeping its layout.
+
+    Section HMACs (inside the encrypted metadata) and the ELF SHA-1 in the control
+    info are recomputed. The ECDSA signature cannot be, and is left as it was.
+    """
+    sections, phdrs, _, meta = parse_all(orig_self)
     out = bytearray(orig_self)
+    blob = bytearray(meta.blob)
     for sec in sections:
         p_offset, p_filesz = _phdr(phdrs, sec.phdr_index)
         data = patched_elf[p_offset:p_offset + p_filesz]
@@ -182,7 +212,10 @@ def repack(orig_self: bytes, patched_elf: bytes) -> bytes:
             data = deflate_to_size(data, sec.size)
         if len(data) != sec.size:
             raise ValueError("segment size changed; the container would need new metadata")
+        blob[sec.hash_pos:sec.hash_pos + 20] = hmac.new(sec.hmac_key, data, hashlib.sha1).digest()
         out[sec.off:sec.off + sec.size] = _ctr(sec.key, sec.iv, data) if sec.encrypted else data
+    out[meta.file_off:meta.file_off + len(blob)] = _ctr(meta.key, meta.iv, bytes(blob))
+    out[ELF_DIGEST_OFF:ELF_DIGEST_OFF + 20] = hashlib.sha1(patched_elf).digest()
     return bytes(out)
 
 
