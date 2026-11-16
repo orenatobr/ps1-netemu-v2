@@ -1,115 +1,155 @@
 # ps1_netemu v2.00
 
-A patched `ps1_netemu.self` (the PS3's PS1 emulator) with three changes:
+A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package for it. The package is always
+`ps1_netemu_v2.00.pkg` (patch version 2.00); the release tag counts the published builds (see `CHANGELOG.md`).
 
-1. **Analog mode switches on, and the motors get what the game commands.** A game that enters DualShock
-   configuration (command `0x43`, data byte 1) supports analog sticks and motors. The hook at `0xd6b7c` jumps to new
-   code (`cave_analog.py`) that sets the pad's analog flag (record + 0x9c) and redoes the displaced stock
-   instructions. The pad starts digital (setting 28 reads 0), the game's own `0x44` (set mode) and `0x4d` (motor
-   mapping) still have the last word, and the menu toggle works both ways. For vibration, three words in the actuator
-   function (`0xeb2d8..0xeb2e0`) replace the stock chain (an internal block flag at `X + 0x84` that the pad thread resets
-   every cycle, and a strength curve built from settings 50 and 51) with a direct pass: small motor = what the game sent
-   (on/off), large motor = what it sent (0..255). The "Vibration Function" menu option could not be located in memory
-   (toggling it changed no setting, pad record or pad state), so vibration no longer depends on it. Digital-only games
-   such as Castlevania never send `0x43` and stay digital. Two earlier approaches broke Castlevania and were dropped:
-   analog forced at boot, and analog whenever a game clocked extra pad bytes. Checked in a PowerPC interpreter against the
-   stock code; analog and vibration were confirmed on a console (Chrono Cross).
-2. **DuckStation-style vertical overscan, cropped to the area the game really draws.** The stock formula shows a
-   224-line window (video lines 24 to 248) of the display the game declares. On top of it, new code in the text
-   segment extension reads the GPU packet buffer for the game's draw area (`GP0 E3/E4`, never decoded on the CPU side)
-   and crops the picture to it, so Castlevania: Symphony of the Night, which draws only lines 20 to 226 of its 240,
-   loses its black band. Half of the extra zoom goes to the width, so the distortion is shared (about 4% each way
-   for that game). The window grows at once and shrinks only after 24 display commands in a row ask for the same smaller
-   one, and stays as it is when a frame has no usable area, so scenes that alternate areas (the game's intro) do
-   not make the picture jump. PAL, 480i and games without a usable draw area keep the stock behavior. The width is the
-   emulator's own (an earlier version widened it, which was not requested, and it was reverted).
-3. **One memory card per game, named after the game's serial, in slot 1.** A hook at `0xb3b90` (inside `xMcInsert`)
-   first calls `percard` (`cave_percard.py`), which opens the disc image whose path the emulator keeps in a global
-   buffer (copied from `argv[5]`; webMAN starts the emulator without it, so the path is then read from webMAN's own
-   record of the game it just launched, `/dev_hdd0/tmp/wmtmp/last_game.txt`), finds the ISO9660 volume descriptor in any of three layouts (raw 2352-byte
-   sectors with a 24 or 16 byte header, or 2048-byte sectors), reads `SYSTEM.CNF`, takes the executable name after
-   `cdrom:` (`SLUS_006.62;1`) and turns it into the serial `SLUS-00662` (underscore to hyphen, dot dropped, upper
-   case); the card is handed to the slots as `SLUS-00662.VM1`, with the extension, the form slot 2 uses (`PS1.VM1`) and the
-   one the Assign Slots menu matches against its list of cards. It opens `/dev_hdd0/savedata/vmc/SLUS-00662.VM1`; if the file does not exist it writes a blank formatted
-   128 KB card (the same layout as any PS1 card: `MC` header, 15 free directory frames, 20 empty broken-sector frames,
-   `0xFF` filler frames, empty blocks); an existing card is only opened and closed, never rewritten. That card
-   becomes slot 1 (inserted, and registered with the system through `cellSysutilGameDataAssignVmc(0, name)`, which is what
-   the *Assign Slots* menu also does); slot 2 is untouched. If the serial cannot be found (no disc path, unknown format, no `BOOT` line,
-   a failed open or write) the original card logic runs, and so does the earlier rule: a PS1 card in slot 2 moves to
-   slot 1 when slot 1 has no PS1 card (`.VM1` file check, PS2 cards never count). The discs of any multi-disc game share one card:
-   when the image path has `(Disc 2)` to `(Disc 9)` (also `[Disc 2]` and `(Disc 2 of 3)`), the code reads the serial
-   from the `(Disc 1)` image with the same name instead, so every disc of the set uses the card named after disc 1.
-   Nothing is specific to one title: the serial comes from each disc's `SYSTEM.CNF`, and the grouping from the file
-   name, so it works for any game named in the usual Redump style (Final Fantasy VII, Metal Gear Solid, Xenogears,
-   Vagrant Story and Chrono Cross are in the tests). Without that `(Disc 1)` file the disc's own serial is used, and
-   other disc naming (`CD2`, `Disc2`) gets one card per disc. The earlier rule (a PS1 card in slot 2 moves to slot 1
-   when slot 1 has none) stays as the fallback. Saves kept in the old shared `PS1.VM1` stay there: assign it to slot 2
-   in the emulator menu to copy them into a per-game card. 99 tests run the real emulator code in a PowerPC
-   interpreter with a simulated file system and synthetic discs, and the whole flow was confirmed on a console
-   (Chrono Cross disc 1: serial read from the disc, card created, shown in slot 1 as `SLUS-01041.VM1`).
+## Features
 
-## Known limitations
+| | Feature | In one line |
+|---|---|---|
+| 1 | **Overscan 4:3, DuckStation style** | The picture fills the 4:3 window without black bands, cropped to the area the game really draws. |
+| 2 | **Automatic analog mode** | Switches on when a game talks DualShock; the pad starts digital and digital-only games stay digital. |
+| 3 | **Vibration** | The motors get exactly what the game commands. |
+| 4 | **One memory card per game** | Named after the game's serial, created blank when missing, shown in slot 1 and registered with the system. |
+| 5 | **Multi-disc games share a card** | Disc 2, 3, ... use the card of disc 1. |
+| 6 | **Slot 2 to slot 1 fallback** | A PS1 card in slot 2 moves to slot 1 when slot 1 has none (PS2 cards never count). |
+| 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
 
-- **(Fixed in v2.08, was open until v2.07) Castlevania: Symphony of the Night kept a thin black band at the top.** Static analysis of the draw path
-  (`0x1152a0` and `0x115c40`, shared by every game) shows the quad is correct: the vertices are
-  the `+0x1ac..+0x1b8` floats this patch computes (they overshoot the screen by 7% for that game), and
-  the texture coordinates span the whole declared display area (`+0x1bc`/`+0x1c0` = 253 x 238 texels).
-  So the band is not geometry. It is black pixels inside the area the game declares. Removing it needs a
-  per-frame scan of the frame content, which is not implemented, because the frame lives in RSX memory
-  that only the emulator can read. Games that fill their declared area (Legend of Legaia, Chrono Cross) are fine.
-- **Memory card in slot 1 (not implemented).** The emulator's `main` receives the cards as arguments
-  (`argv[1]` = slot 1, `argv[2]` = slot 2, NULL when absent) and calls `xMcInsert` (`0xb3a..`). The rule is not as simple as
-  "slot 1 empty and slot 2 has a card": the emulator shares code with PS2 and also knows `.VM2` cards, so the card must be
-  a PS1 card (`.VM1`) before it is moved. The move itself would reuse the path at `0xb4124` when slot 1 comes empty
-  (`0xb4148`), but it also needs the null and empty-string checks on `argv[2]` plus a card-type check, and the binary has no safe free
-  space: its zero runs are ELF header fields and data tables, and there are no alignment `nop`s. The in-game
-  "Assign Slots" menu does the same by hand.
-- **Analog with vibration: handled by the stock emulator, not patched.** The pad command table at `0xd5328`
-  (commands `0x40` to `0x4f`) has handlers for every DualShock command a game can send: `0x43` enter
-  configuration (`0xd5de0`), `0x44` set analog mode (`0xd5908`), `0x45` to `0x4a`, `0x4c`, and `0x4d` rumble
-  mapping (`0xd59fc`); only `0x40`, `0x41`, `0x4b`, `0x4e` and `0x4f` fall to the default. So a game that
-  supports analog switches the pad to analog and enables rumble by itself, as on a console, and the emulator's
-  "Vibration Function" setting applies to it. A game that never sends these commands cannot be told apart from a
-  digital-only game, and two attempts to guess (analog forced at boot, analog when the game clocks extra bytes)
-  broke Castlevania: Symphony of the Night, so neither is shipped.
-- PAL and 480i modes are untested; they keep the stock behavior.
+Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
+1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
+Not tested: PAL and 480i modes (they keep the stock behavior) and features 5 and 6 on a console (they run
+in a PowerPC interpreter against the real emulator code).
+
+### 1. Overscan 4:3, DuckStation style
+
+The stock formula shows a 224-line window (video lines 24 to 248) of the display the game declares. New code
+reads the GPU packet buffer for the game's draw area (`GP0 E3/E4`, which the CPU side never decodes) and crops the
+picture to it, so a game that draws only part of its frame loses its black bands (Castlevania: Symphony of the
+Night draws lines 20 to 226 of 240). Half of the extra zoom goes to the width, so the distortion is shared
+(about 4% each way for that game). The width is the emulator's own: the image stays 4:3 and is not widened.
+
+The window grows at once and shrinks only after 24 display commands in a row ask for the same smaller one, and it
+stays as it is when a frame has no usable area, so scenes that alternate draw areas (an intro) do not make the
+picture jump. PAL, 480i and games without a usable draw area keep the stock behavior. Code: `cave_overscan.py`
+(hook at `0x114148`, window state in five free words at `0x1be75c`).
+
+### 2. Automatic analog mode
+
+A game that enters DualShock configuration (command `0x43`, data byte 1) supports analog sticks. The hook at
+`0xd6b7c` jumps to `cave_analog.py`, which sets the pad's analog flag (record + `0x9c`). The pad starts digital
+(setting 28 reads 0); the game's own `0x44` (set mode) still has the last word, and the menu toggle works both
+ways. Digital-only games such as Castlevania never send `0x43` and stay digital. Two earlier approaches broke
+Castlevania and were dropped: analog forced at boot, and analog whenever a game clocked extra pad bytes.
+
+### 3. Vibration
+
+Three words in the actuator function (`0xeb2d8..0xeb2e0`) replace the stock chain (an internal block flag at
+`X + 0x84` that the pad thread resets every cycle, and a strength curve built from settings 50 and 51) with a
+direct pass: small motor = what the game sent (on/off), large motor = what it sent (0 to 255).
+
+**This ignores the emulator menu option "Vibration Function".** That option could not be located in memory
+(toggling it changed no setting, pad record or pad state), so vibration is always on for games that ask for it.
+
+### 4. One memory card per game
+
+A hook at `0xb3b90` (inside `xMcInsert`) first calls `percard` (`cave_percard.py`):
+
+1. It needs the disc image path. The emulator keeps it in a global buffer (from `argv[5]`), but webMAN starts the
+   emulator without it ("boot from disc"), so the path is then read from webMAN's own record of the game it just
+   launched, `/dev_hdd0/tmp/wmtmp/last_game.txt`.
+2. It opens the image and finds the ISO9660 volume descriptor in any of three layouts (raw 2352-byte sectors with a
+   24 or 16 byte header, or 2048-byte sectors), reads the root directory and `SYSTEM.CNF`, takes the executable
+   name after `cdrom:` (`SLUS_006.62;1`) and turns it into the serial `SLUS-00662` (underscore to hyphen, dot
+   dropped, upper case).
+3. It opens `/dev_hdd0/savedata/vmc/SLUS-00662.VM1`. If the file does not exist it writes a blank formatted 128 KB
+   card (the layout of any PS1 card: `MC` header, 15 free directory frames, 20 empty broken-sector frames, `0xFF`
+   filler frames, empty blocks). An existing card is only opened and closed, never rewritten.
+4. The card is handed to slot 1 as `SLUS-00662.VM1`, with the extension: that is the form slot 2 uses (`PS1.VM1`)
+   and the one the *Assign Slots* menu matches against its list of cards. It is also registered with the system
+   through `cellSysutilGameDataAssignVmc(0, name)`, which is what that menu does. Slot 2 is untouched.
+
+If the serial cannot be found (no disc path, unknown format, no `BOOT` line, a failed open or write) the original
+card logic runs, including the rule of feature 6.
+
+Your saves kept in the old shared `PS1.VM1` do not appear in the per-game cards: assign `PS1.VM1` to slot 2 in the
+emulator menu to copy them.
+
+### 5. Multi-disc games
+
+When the image path has `(Disc 2)` to `(Disc 9)` (also `[Disc 2]` and `(Disc 2 of 3)`), the code reads the serial
+from the `(Disc 1)` image with the same name instead, so every disc of the set uses the card named after disc 1.
+Nothing is specific to one title: the serial comes from each disc's `SYSTEM.CNF` and the grouping from the file
+name, so it works for any game named in the usual Redump style (Final Fantasy VII, Metal Gear Solid, Xenogears,
+Vagrant Story and Chrono Cross are in the tests). Without the `(Disc 1)` file the disc's own serial is used, and
+other disc naming (`CD2`, `Disc2`) gets one card per disc.
+
+### 6. Slot 2 to slot 1 fallback
+
+The emulator receives the cards as `argv[1]` (slot 1) and `argv[2]` (slot 2). When the per-game card cannot be made
+and slot 2 holds a PS1 card while slot 1 has none (or has something that is not a PS1 card), slot 2's card is
+inserted into slot 1 through the emulator's own path at `0xb4124`. A card counts as PS1 when
+`/dev_hdd0/savedata/vmc/<name>.VM1` can be opened, so a PS2 card (`.VM2`) or a missing file never counts.
+
+### 7. Installer
+
+`ps1_netemu_v2.00.pkg` installs the app **PS1 Emulator Patch** (English and Portuguese). It saves the original to
+`/dev_hdd0/ps1_netemu_stock.self` first, checks every write by hash, refuses any `ps1_netemu.self` that is not the
+one build the patch was made for (SHA-256 `27d4121e...ebdd5d`), restores the original with Triangle, and warns on
+screen when the patch is installed without a backup.
 
 ## Install
 
-### Option 1: the package (recommended)
+1. Copy `ps1_netemu_v2.00.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it from the XMB
+   (Game > Package Manager > Install Package Files).
+2. Open **PS1 Emulator Patch**. Press **Cross** (or Circle with the Japanese layout) to install, **Triangle** to
+   restore the original, the other face button to exit.
+3. Close the game and open it again: the emulator reads its file at launch.
 
-1. Copy `ps1_netemu_v2.00.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it
-   from the XMB (Game > Package Manager > Install Package Files).
-2. Open **PS1 Emulator Patch**. Press **Cross** (or Circle with the Japanese layout) to install,
-   **Triangle** to restore the original, the other face button to exit.
+The backup is only made when the app finds the original on the console. If the patched file was put there by
+another route first, there is no backup and **Triangle** answers "no backup": copy the original (SHA-256
+`27d4121e...`) to `/dev_hdd0/ps1_netemu_stock.self` yourself. If a game fails to start, restore the original.
 
-The app saves the original to `/dev_hdd0/ps1_netemu_stock.self` first and checks every write by
-hash. It refuses any `ps1_netemu.self` that is not the one build the patch was made for
-(SHA-256 `27d4121e...ebdd5d`), so it never overwrites an unknown file.
+The `.self` is embedded in the package and is not offered as a separate download: a deliberate deviation from the
+original goal (a downloadable `ps1_netemu_v2.00.self`), made at the owner's request ("então não precisa ter o .self
+no release latest"). To use the file directly, build it (below) and copy `ps1_netemu_v2.00.self` to
+`/dev_flash/ps1emu/ps1_netemu.self`: the flash must be mounted writable (webMAN: open `http://<ps3-ip>/dev_blind`),
+webMAN's FTP cannot rename over an existing file (delete the old one first), and a copy of the original must be kept.
 
-The backup is only made when the app finds the original on the console. If the patched file
-was put there by another route first, there is no backup and **Triangle** answers "no backup":
-copy the original (SHA-256 `27d4121e...`) to `/dev_hdd0/ps1_netemu_stock.self` yourself.
-The `.self` is embedded in the package and is not offered as a separate download. This is a deliberate
-deviation from the original goal (a downloadable `ps1_netemu_v2.00.self`), made at the owner's request (their words: "então não precisa ter o .self no release latest").
-The app now shows this warning on screen when the patch is installed and no backup exists.
+## Limitations
 
-### Option 2: the file
+- Vibration ignores the "Vibration Function" menu option (feature 3).
+- PAL and 480i keep the stock overscan and were not tested.
+- The per-game card needs the disc path: it works under webMAN (`last_game.txt`) or when the emulator is given
+  `argv[5]`. Another launcher would fall back to feature 6.
+- Multi-disc grouping depends on the `(Disc N)` naming; `CD2` or `Disc2` get one card per disc.
+- Analog is not forced at boot: a game that never talks DualShock cannot be told apart from a digital-only game.
+- The patched binary is Sony's code with a few dozen words changed plus about 2.5 KB of new code. Use it on your
+  own console only; this repository is private for that reason, so downloads need the owner's login.
 
-The release ships only the package. Build the file yourself (see below) and copy `ps1_netemu_v2.00.self` to `/dev_flash/ps1emu/ps1_netemu.self`. The flash must be mounted
-writable (webMAN: open `http://<ps3-ip>/dev_blind`) and webMAN's FTP cannot rename over an
-existing file: delete the old one first. Keep a copy of the original.
+## Code map
+
+| File | What |
+|---|---|
+| `ps1_netemu_patch.py` | Unpacks the SELF, applies every patch, grows the text segment (`extend_text`), repacks, recomputes the hashes |
+| `ps3mapi_patch.py` | The in-place word patches (`CODE`, `CONSTANTS`) and the live patcher |
+| `cave_overscan.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
+| `ppcasm.py` | Tiny PowerPC assembler with labels, only what the caves use |
+| `tests/` | `test_patch.py` (container), `test_emulation.py` (runs the real emulator code in a PowerPC interpreter) |
+| `installer/` | The PS3 app (PSL1GHT), its tests and the packaging tools |
 
 ## How the `.self` is made
 
-The stock SELF container is kept: header, offsets and sizes do not move. Each segment is
-decrypted with the public APP key for revision 0x1C, patched, recompressed to the **same stored
-size** (zlib padded with empty blocks) and encrypted again. The section HMAC-SHA1s inside the
-metadata and the ELF SHA-1 in the control info are recomputed. The ECDSA signature stays as it
-was: this console does not check it, but it does check the hashes (it rejects a file whose
-hashes are stale with error `80010017`).
+The stock SELF container is kept: header, offsets and sizes do not move. Each segment is decrypted with the public
+APP key for revision 0x1C, patched, recompressed to the **same stored size** (zlib padded with empty blocks) and
+encrypted again. The section HMAC-SHA1s inside the metadata and the ELF SHA-1 in the control info are recomputed.
+The ECDSA signature stays as it was: this console does not check it, but it does check the hashes (it rejects a file
+whose hashes are stale with error `80010017`).
 
-The changed words are in `ps3mapi_patch.py` (`CODE`, `CONSTANTS`) and `ps1_netemu_patch.py`
+The text segment is extended by 4 KB (`p_filesz` and `p_memsz` of program header 0, in the ELF and in the SELF's
+copy); the page was already mapped up to `0x1b0000`, so no address space is added. That space holds the new code.
+The code cave is read-only memory, so state that changes at run time lives in free words of the data segment
+(`0x1be75c` for the overscan window, `0x1be780` for the card name).
+
 The patcher checks the original bytes at every site and refuses anything else.
 
 ```
@@ -119,6 +159,14 @@ PS1_NETEMU_SELF=ps1_netemu.self python -m pytest -q tests
 ```
 
 You need the stock `ps1_netemu.self` (APP, key revision 0x1C); it is not in this repository.
+
+### Tests
+
+The tests run the **real emulator code** (the original and the patched words) in a small PowerPC interpreter that
+raises on any instruction it does not know, with simulated files and synthetic ISO9660 discs: three layouts, many
+`BOOT` line spellings, blank card format, existing cards untouched, every failure falling back, every opened file
+closed, several multi-disc titles, and register and stack preservation. The assembler refuses `addi` with `r0` as the
+source (it reads the literal 0), a mistake the tests caught once.
 
 ## Build the package
 
@@ -138,15 +186,19 @@ tools/preview.sh    # renders the app screens to PNG on the Mac
 
 ## Live patch (no install)
 
-`ps3mapi_patch.py` writes the same changes into the running emulator through webMAN PS3MAPI.
-Nothing on the console changes and it is undone when the game closes. It checks the stock bytes
-before writing.
+`ps3mapi_patch.py` writes the in-place changes (the overscan formulas and the vibration pass) into the running
+emulator through webMAN PS3MAPI. Nothing on the console changes and it is undone when the game closes. It checks the
+stock bytes before writing. The new code of features 1 (content crop), 2, 4, 5 and 6 lives in the text segment
+extension, which only the installed `.self` has.
 
 ```
 python ps3mapi_patch.py 192.168.1.85            # apply, game running
 python ps3mapi_patch.py 192.168.1.85 --revert   # restore
 python ps3mapi_patch.py 192.168.1.85 --watch    # patch every game you start
 ```
+
+Careful with webMAN PS3MAPI: reads of 256 bytes work, but bursts of hundreds of requests make webMAN drop out, and
+reading the RSX video memory (`0xC0xxxxxx`) is not possible through it.
 
 ## What did not work
 
@@ -156,9 +208,13 @@ python ps3mapi_patch.py 192.168.1.85 --watch    # patch every game you start
 | fself with a minimal header | error `80010001` |
 | Stock container, segments repacked, hashes left stale | error `80010017` |
 | Stock container, segments repacked, hashes recomputed | works |
+| Analog forced at boot | breaks digital-only games (Castlevania) |
+| Analog whenever a game clocks extra pad bytes | broke Castlevania |
+| Widening the picture to fill the sides | not requested, reverted |
+| Writing the vibration block flag (`X + 0x84`) | the pad thread resets it every cycle |
+| Creating the card with `0x200` as the create flag | `0x200` is `O_TRUNC`; PS3 flags are octal, `O_CREAT` is `0x40` |
+| Handing the card to slot 1 without the extension | the Assign Slots menu showed slot 1 empty |
 
-## Notes
+## Restore
 
-- The patched binary is Sony's code with a few dozen words changed. Use it on your own console only; this
-  repository is private for that reason, so downloads need the owner's login.
-- Restore: the package app (Triangle), or copy the original back the same way you installed.
+The package app (Triangle), or copy the original back the same way you installed.
