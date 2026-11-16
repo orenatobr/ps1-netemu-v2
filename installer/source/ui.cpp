@@ -12,7 +12,8 @@ const Text kEn = {"PS1 emulator patch v2.00",
                   "Already installed.", "Original restored.",
                   "This file is not the build the patch was made for. Nothing was changed.",
                   "The package is damaged. Nothing was changed.", "No backup found. Nothing to restore.",
-                  "Write failed. The original was kept; try again.", "Could not open the system files. This needs custom firmware."};
+                  "Write failed. The original was kept; try again.", "Could not open the system files. This needs custom firmware.",
+                  "The patch is installed but there is no backup of the original, so Triangle cannot restore it. Copy the original to /dev_hdd0/ps1_netemu_stock.self."};
 
 const Text kPt = {"Patch do emulador de PS1 v2.00",
                   "ps1_netemu.self: o analógico liga sozinho quando o jogo pede, e a imagem preenche a tela (overscan estilo DuckStation, NTSC).",
@@ -22,7 +23,8 @@ const Text kPt = {"Patch do emulador de PS1 v2.00",
                   "Já está instalado.", "Original restaurado.",
                   "Este arquivo não é a versão para a qual o patch foi feito. Nada foi alterado.",
                   "O pacote está danificado. Nada foi alterado.", "Nenhum backup encontrado. Nada para restaurar.",
-                  "Falha ao gravar. O original foi mantido; tente de novo.", "Não foi possível abrir os arquivos do sistema. Precisa de firmware customizado."};
+                  "Falha ao gravar. O original foi mantido; tente de novo.", "Não foi possível abrir os arquivos do sistema. Precisa de firmware customizado.",
+                  "O patch está instalado, mas não há backup do original, então Triângulo não consegue restaurar. Copie o original para /dev_hdd0/ps1_netemu_stock.self."};
 
 std::string message(const Text& t, const installer::Outcome& o) {
     if (o.code == "installed") return t.installed;

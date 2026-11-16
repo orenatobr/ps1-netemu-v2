@@ -5,6 +5,7 @@
 #include <string>
 
 #include "gfx.h"
+#include "fsx.h"
 #include "installer.h"
 #include "ps3.h"
 #include "ui.h"
@@ -38,6 +39,7 @@ int main() {
     bool noteOk = false;
     installer::State state = mounted ? installer::detect(cfg) : installer::State::Missing;
     if (!mounted) note = t.noAccess;
+    else if (state == installer::State::Patched && !fsx::exists(kBackup)) note = t.patchedNoBackup;
 
     while (!ps3::quitRequested()) {
         ps3::pump();

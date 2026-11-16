@@ -2,7 +2,8 @@
 
 A patched `ps1_netemu.self` (the PS3's PS1 emulator) with two changes:
 
-1. **Analog mode switches on by itself when the game asks for it.** The pad starts digital, like
+1. **Analog mode switches on by itself (a deliberate change from "analog on at boot", which broke
+   digital-only games; analog-requesting games are still untested) when the game asks for it.** The pad starts digital, like
    a real DualShock, so digital-only games (Castlevania: Symphony of the Night) keep working.
    A game that configures the pad (as the original emulator already handled) or that clocks the
    extra analog bytes gets analog mode right away. The in-game "Switch Analog Mode" still toggles it.
@@ -38,7 +39,9 @@ hash. It refuses any `ps1_netemu.self` that is not the one build the patch was m
 The backup is only made when the app finds the original on the console. If the patched file
 was put there by another route first, there is no backup and **Triangle** answers "no backup":
 copy the original (SHA-256 `27d4121e...`) to `/dev_hdd0/ps1_netemu_stock.self` yourself.
-The `.self` is embedded in the package and is not offered as a separate download.
+The `.self` is embedded in the package and is not offered as a separate download. This is a deliberate
+deviation from the original goal (a downloadable `ps1_netemu_v2.00.self`), made at the owner's request.
+The app now shows this warning on screen when the patch is installed and no backup exists.
 
 ### Option 2: the file
 

@@ -10,7 +10,7 @@ namespace ui {
 
 struct Text {
     const char *title, *subtitle, *file, *stock, *patched, *unknown, *missing, *install, *restore, *exit, *triangle;
-    const char *installed, *already, *restored, *notStock, *badPayload, *noBackup, *ioError, *noAccess;
+    const char *installed, *already, *restored, *notStock, *badPayload, *noBackup, *ioError, *noAccess, *patchedNoBackup;
 };
 
 extern const Text kEn;
