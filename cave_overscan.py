@@ -37,10 +37,11 @@ SCAN_PX = 320  # 16-bit values scanned per row, from the first column of the dis
 SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
 CONSTS = (-1.0, 1.0, 2.0, 0.5, 0.25, 0.75)  # data offsets 0, 4, 8, 12, 16, 20
 STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
-HOLD = 90  # display commands in a row (about 1.5 s) before the window shrinks: slow, so scene changes do not make the picture jump
+HOLD = 24  # display commands in a row before the window shrinks
+PIXEL_TRIM = False  # trim black rows read from the VRAM: off by default (it made field screens worse on the console)
 
 
-def program(data_va: int) -> list[tuple]:
+def program(data_va: int, trim: bool = PIXEL_TRIM) -> list[tuple]:
     hi, lo = (data_va >> 16) & 0xFFFF, data_va & 0xFFFF
     p: list[tuple] = [("stdu", "r1", -FRAME, "r1")]
     p += [("std", f"r{r}", 0x80 + 8 * k, "r1") for k, r in enumerate(SAVE_R)]
@@ -88,49 +89,58 @@ def program(data_va: int) -> list[tuple]:
         ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
         ("label", "b1"),
         ("cmpw", "r9", "r0"), ("ble", "noc"),
-        # black rows at the edges: the draw areas say where the game MAY draw, the VRAM says where it did. Rows made
-        # only of black pixels (0x7F7F masks the mask bit whichever byte order the VRAM has) are trimmed from the bottom, then from the top, at most
-        # MAX_TRIM each. Without a readable VRAM (base 0) or width nothing happens.
         # diagnostics for tools/probe_overscan.py (four free words after the state): the display start row, H, and
         # the window the areas gave before the trim
         ("stw", "r14", 20, "r12"), ("stw", "r11", 24, "r12"), ("stw", "r10", 28, "r12"), ("stw", "r9", 32, "r12"),
-        ("stw", "r10", 0x78, "r1"), ("stw", "r9", 0x7C, "r1"),  # the window before the trim, to fall back on
-        ("lwz", "r15", -0x7840, "r2"), ("lwz", "r15", 0, "r15"), ("cmpwi", "r15", 0), ("beq", "notrim"),  # r27 of 0x114250: the VRAM
-        ("lwz", "r16", 0, "r22"), ("rlwinm", "r16", "r16", 1, 0, 30),  # first column, in bytes
-        ("li", "r17", SCAN_PX),
-        ("li", "r8", 0),  # pass 0 trims the bottom, pass 1 the top
-        ("label", "pass"),
-        ("li", "r4", 0), ("cmpwi", "r8", 0), ("bne", "topstart"),
-        ("addi", "r3", "r9", -1), ("li", "r7", -1), ("b", "rowloop"),
-        ("label", "topstart"),
-        ("mr", "r3", "r10"), ("li", "r7", 1),
-        ("label", "rowloop"),
-        ("cmpwi", "r4", MAX_TRIM), ("bge", "passend"),
-        ("cmpwi", "r8", 0), ("bne", "chktop"),
-        ("cmpw", "r3", "r10"), ("ble", "passend"), ("b", "scan"),
-        ("label", "chktop"),
-        ("addi", "r19", "r9", -1), ("cmpw", "r3", "r19"), ("bge", "passend"),
-        ("label", "scan"),
-        ("add", "r18", "r14", "r3"), ("rlwinm", "r18", "r18", 11, 0, 20), ("add", "r18", "r18", "r15"),
-        ("add", "r18", "r18", "r16"), ("mr", "r19", "r17"),
-        ("label", "px"),
-        ("lhz", "r0", 0, "r18"), ("andi.", "r0", "r0", 0x7F7F), ("cmpwi", "r0", 0), ("bne", "passend"),
-        ("addi", "r18", "r18", 2), ("addi", "r19", "r19", -1), ("cmpwi", "r19", 0), ("bgt", "px"),
-        ("addi", "r4", "r4", 1), ("add", "r3", "r3", "r7"), ("b", "rowloop"),
-        ("label", "passend"),
-        ("cmpwi", "r8", 0), ("bne", "applytop"),
-        ("subf", "r9", "r4", "r9"), ("li", "r8", 1), ("b", "pass"),
-        ("label", "applytop"),
-        ("add", "r10", "r10", "r4"),
-        ("label", "notrim"),
+    ]
+    if trim:
+        p += [
+            # black rows at the edges (PIXEL_TRIM): the draw areas say where the game MAY draw, the VRAM where it did.
+            # Rows of only black pixels (0x7F7F ignores the mask bit in either byte order) are trimmed from the bottom,
+            # then the top, at most MAX_TRIM each; without a readable VRAM nothing happens.
+            ("stw", "r10", 0x78, "r1"), ("stw", "r9", 0x7C, "r1"),  # the window before the trim, to fall back on
+            ("lwz", "r15", -0x7840, "r2"), ("lwz", "r15", 0, "r15"), ("cmpwi", "r15", 0), ("beq", "notrim"),  # r27 of 0x114250: the VRAM
+            ("lwz", "r16", 0, "r22"), ("rlwinm", "r16", "r16", 1, 0, 30),  # first column, in bytes
+            ("li", "r17", SCAN_PX),
+            ("li", "r8", 0),  # pass 0 trims the bottom, pass 1 the top
+            ("label", "pass"),
+            ("li", "r4", 0), ("cmpwi", "r8", 0), ("bne", "topstart"),
+            ("addi", "r3", "r9", -1), ("li", "r7", -1), ("b", "rowloop"),
+            ("label", "topstart"),
+            ("mr", "r3", "r10"), ("li", "r7", 1),
+            ("label", "rowloop"),
+            ("cmpwi", "r4", MAX_TRIM), ("bge", "passend"),
+            ("cmpwi", "r8", 0), ("bne", "chktop"),
+            ("cmpw", "r3", "r10"), ("ble", "passend"), ("b", "scan"),
+            ("label", "chktop"),
+            ("addi", "r19", "r9", -1), ("cmpw", "r3", "r19"), ("bge", "passend"),
+            ("label", "scan"),
+            ("add", "r18", "r14", "r3"), ("rlwinm", "r18", "r18", 11, 0, 20), ("add", "r18", "r18", "r15"),
+            ("add", "r18", "r18", "r16"), ("mr", "r19", "r17"),
+            ("label", "px"),
+            ("lhz", "r0", 0, "r18"), ("andi.", "r0", "r0", 0x7F7F), ("cmpwi", "r0", 0), ("bne", "passend"),
+            ("addi", "r18", "r18", 2), ("addi", "r19", "r19", -1), ("cmpwi", "r19", 0), ("bgt", "px"),
+            ("addi", "r4", "r4", 1), ("add", "r3", "r3", "r7"), ("b", "rowloop"),
+            ("label", "passend"),
+            ("cmpwi", "r8", 0), ("bne", "applytop"),
+            ("subf", "r9", "r4", "r9"), ("li", "r8", 1), ("b", "pass"),
+            ("label", "applytop"),
+            ("add", "r10", "r10", "r4"),
+            ("label", "notrim"),
+        ]
+    p += [
         # ponytail: 3/4 of the display is a guess (max zoom 1.33), not measured on a game with a small real picture;
         # raise or drop it if a game legitimately draws less (the picture is then left as the base formula shows it)
         ("subf", "r7", "r10", "r9"), ("rlwinm", "r8", "r11", 30, 2, 31), ("subf", "r8", "r8", "r11"),
-        ("cmpw", "r7", "r8"), ("bge", "capok"),
-        # too small after the trim (the VRAM did not read as expected): use the draw areas alone, as before the trim
-        ("lwz", "r10", 0x78, "r1"), ("lwz", "r9", 0x7C, "r1"),
-        ("subf", "r7", "r10", "r9"), ("cmpw", "r7", "r8"), ("blt", "noc"),
-        ("label", "capok"),
+        ("cmpw", "r7", "r8"), ("bge" if trim else "blt", "capok" if trim else "noc"),
+    ]
+    if trim:
+        p += [  # too small after the trim (the VRAM did not read as expected): use the draw areas alone
+            ("lwz", "r10", 0x78, "r1"), ("lwz", "r9", 0x7C, "r1"),
+            ("subf", "r7", "r10", "r9"), ("cmpw", "r7", "r8"), ("blt", "noc"),
+            ("label", "capok"),
+        ]
+    p += [
         # a usable candidate [r10, r9): it grows the window at once and shrinks it only after HOLD
         # display commands in a row asked for the same smaller one, so a scene that alternates
         # areas (or has none for a while) cannot make the picture jump
@@ -179,11 +189,11 @@ def program(data_va: int) -> list[tuple]:
     return p
 
 
-def build(cave_va: int) -> tuple[list[tuple[int, int, int, str]], int]:
+def build(cave_va: int, trim: bool = PIXEL_TRIM) -> tuple[list[tuple[int, int, int, str]], int]:
     """Return the (va, old, new, what) patches and the number of bytes used from `cave_va`."""
-    size = 4 * len(assemble(cave_va, program(0)))
+    size = 4 * len(assemble(cave_va, program(0, trim)))
     data_va = cave_va + size
-    words = assemble(cave_va, program(data_va))
+    words = assemble(cave_va, program(data_va, trim))
     data = [struct.unpack(">I", struct.pack(">f", c))[0] for c in CONSTS]
     patches = [(cave_va + 4 * i, 0, w, "overscan cave code") for i, w in enumerate(words)]
     patches += [(data_va + 4 * i, 0, w, "overscan cave data") for i, w in enumerate(data)]

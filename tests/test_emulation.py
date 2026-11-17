@@ -284,6 +284,16 @@ def cave_elf():
     return P.apply_patches(P.extend_text(stock))
 
 
+@pytest.fixture(scope="module")
+def trim_elf():
+    """The patched image with the optional pixel trim of the overscan cave switched on."""
+    import cave_overscan as cave
+    stock = P.unpack(Path(os.environ["PS1_NETEMU_SELF"]).read_bytes())
+    with_trim, _ = cave.build(P.OVERSCAN_VA, trim=True)
+    others = tuple(p for p in P.PATCHES if "overscan" not in p.what)
+    return P.apply_patches(P.extend_text(stock), others + tuple(P.Patch(*t) for t in with_trim))
+
+
 def _mocks(files: set[str], log: list):
     def strlen(c):
         c.r[3] = len(c.cstr(c.r[3]))
@@ -931,54 +941,54 @@ def test_the_base_formula_still_crops_lines_above_the_visible_start(elfs):
 FF7_BATTLE = [_e3(0, 8), _e4(319, 165), _e3(0, 166), _e4(319, 239)]
 
 
-def test_black_rows_at_the_bottom_of_the_window_are_trimmed(cave_elf):
+def test_black_rows_at_the_bottom_of_the_window_are_trimmed(trim_elf):
     """Final Fantasy VII battle: the areas reach row 239 but the game draws only up to row 221."""
-    got = _overscan(cave_elf, FF7_BATTLE, vram_rows=range(8, 222))
+    got = _overscan(trim_elf, FF7_BATTLE, vram_rows=range(8, 222))
     assert _same(got, _reference(SOTN, 8, 222, 240))
 
 
-def test_black_rows_at_the_top_are_trimmed_too(cave_elf):
-    got = _overscan(cave_elf, FF7_BATTLE, vram_rows=range(20, 240))
+def test_black_rows_at_the_top_are_trimmed_too(trim_elf):
+    got = _overscan(trim_elf, FF7_BATTLE, vram_rows=range(20, 240))
     assert _same(got, _reference(SOTN, 20, 240, 240))
 
 
-def test_a_row_with_any_content_stops_the_trim(cave_elf):
-    got = _overscan(cave_elf, FF7_BATTLE, vram_rows=list(range(8, 222)) + [235])
+def test_a_row_with_any_content_stops_the_trim(trim_elf):
+    got = _overscan(trim_elf, FF7_BATTLE, vram_rows=list(range(8, 222)) + [235])
     assert _same(got, _reference(SOTN, 8, 236, 240))  # only rows 236..239 above it are black
 
 
-def test_at_most_32_rows_are_trimmed_from_each_side(cave_elf):
-    got = _overscan(cave_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=range(40, 220))
+def test_at_most_32_rows_are_trimmed_from_each_side(trim_elf):
+    got = _overscan(trim_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=range(40, 220))
     assert _same(got, _reference(SOTN, 32, 220, 240))  # rows 0..39 are black but only 32 are trimmed
 
 
-def test_a_trim_that_would_leave_under_three_quarters_is_not_trusted(cave_elf):
-    got = _overscan(cave_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=range(40, 200))
+def test_a_trim_that_would_leave_under_three_quarters_is_not_trusted(trim_elf):
+    got = _overscan(trim_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=range(40, 200))
     assert _same(got, SOTN)  # 32 + 32 rows trimmed would leave 176 of 240
 
 
-def test_a_black_picture_is_left_alone(cave_elf):
+def test_a_black_picture_is_left_alone(trim_elf):
     """A fade to black must not make the window collapse: trimming 32 + 32 rows falls under the three quarter limit."""
-    assert _same(_overscan(cave_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=[]), SOTN)
+    assert _same(_overscan(trim_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=[]), SOTN)
 
 
 def test_without_a_readable_vram_nothing_is_trimmed(cave_elf):
     assert _same(_overscan(cave_elf, FF7_BATTLE), _reference(SOTN, 8, 240, 240))
 
 
-def test_the_trim_works_on_the_buffer_on_display(cave_elf):
-    got = _overscan(cave_elf, [_e3(0, 248), _e4(319, 405), _e3(0, 406), _e4(319, 479)], y0=240, vram_rows=range(8, 222))
+def test_the_trim_works_on_the_buffer_on_display(trim_elf):
+    got = _overscan(trim_elf, [_e3(0, 248), _e4(319, 405), _e3(0, 406), _e4(319, 479)], y0=240, vram_rows=range(8, 222))
     assert _same(got, _reference(SOTN, 8, 222, 240))
 
 
 @pytest.mark.parametrize("black", [0x0000, 0x8000, 0x0080])
-def test_black_is_black_in_either_byte_order_with_or_without_the_mask_bit(cave_elf, black):
+def test_black_is_black_in_either_byte_order_with_or_without_the_mask_bit(trim_elf, black):
     """A black pixel with the mask bit set reads 0x8000 or 0x0080 depending on the byte order of the VRAM."""
     mem = {}
     frames = [FF7_BATTLE] * O.HOLD
     out = []
     for words in frames:
-        cpu = Cpu(cave_elf)
+        cpu = Cpu(trim_elf)
         cpu.mem = mem
         cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
         cpu.wr(STATE + 0x1C, 4, 16)
@@ -1001,8 +1011,8 @@ def test_black_is_black_in_either_byte_order_with_or_without_the_mask_bit(cave_e
     assert _same(out[-1], _reference(SOTN, 8, 222, 240))
 
 
-def test_a_vram_that_trims_too_much_falls_back_to_the_draw_areas(cave_elf):
+def test_a_vram_that_trims_too_much_falls_back_to_the_draw_areas(trim_elf):
     """Field screens read as all black with the display start the cave assumed: the window must be the one the draw
     areas give (rows 8..231), not rejected."""
-    got = _overscan(cave_elf, [_e3(0, 8), _e4(319, 231)], vram_rows=[])
+    got = _overscan(trim_elf, [_e3(0, 8), _e4(319, 231)], vram_rows=[])
     assert _same(got, _reference(SOTN, 8, 232, 240))
