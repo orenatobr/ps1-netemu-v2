@@ -107,6 +107,9 @@ class Cpu:
             elif op == 10:  # cmplwi
                 a, b = self.r[ra] & M32, w & 0xFFFF
                 self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
+            elif op == 28:  # andi. (RS in the RT slot, RA is the destination)
+                self.r[ra] = self.r[rt] & (w & 0xFFFF)
+                self.cr[0] = (0, int(self.r[ra] != 0), int(self.r[ra] == 0))
             elif op == 21:  # rlwinm
                 sh, mb, me = rb, (w >> 6) & 31, (w >> 1) & 31
                 x = self.r[rt] & M32
@@ -387,7 +390,7 @@ def _reference(q, a, b, h):
     return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
 
 
-def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0, vram_rows=None, width=32):
+def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0, vram_rows=None, width=320):
     """Run the hook once per entry of `frames` (each a list of packet-buffer words), sharing memory so the
     remembered window carries over, and return the quad after each call."""
     mem = {} if mem is None else mem
@@ -399,12 +402,11 @@ def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0, vram_rows=None
         cpu.wr(STATE + 0x1C, 4, y1d)
         cpu.wr(STATE + 0x20, 4, y2d)
         cpu.wr(STATE + 0x04, 4, y0)  # first VRAM row of the buffer on display
-        cpu.wr(STATE + 0x08, 4, width)
         if vram_rows is not None:  # the rows (local to the display) that hold a non-black pixel, in the last column
-            cpu.wr(TOC - 0x7830, 4, VRAM_SLOT)
+            cpu.wr(TOC - 0x7840, 4, VRAM_SLOT)
             cpu.wr(VRAM_SLOT, 4, VRAM)
             for row in vram_rows:
-                cpu.wr(VRAM + ((y0 + row) << 11) + 2 * (width - 1), 2, 0x1234)
+                cpu.wr(VRAM + ((y0 + row) << 11) + 2 * (O.SCAN_PX - 1), 2, 0x1234)
         cpu.wr(TOC - 0x77F8, 4, OBJ)
         for k in range(0x17A0 // 4):  # the buffer holds only this frame's words
             cpu.wr(OBJ + 0x60 + 4 * k, 4, words[k] if k < len(words) else 0)
@@ -967,3 +969,33 @@ def test_without_a_readable_vram_nothing_is_trimmed(cave_elf):
 def test_the_trim_works_on_the_buffer_on_display(cave_elf):
     got = _overscan(cave_elf, [_e3(0, 248), _e4(319, 405), _e3(0, 406), _e4(319, 479)], y0=240, vram_rows=range(8, 222))
     assert _same(got, _reference(SOTN, 8, 222, 240))
+
+
+@pytest.mark.parametrize("black", [0x0000, 0x8000, 0x0080])
+def test_black_is_black_in_either_byte_order_with_or_without_the_mask_bit(cave_elf, black):
+    """A black pixel with the mask bit set reads 0x8000 or 0x0080 depending on the byte order of the VRAM."""
+    mem = {}
+    frames = [FF7_BATTLE] * O.HOLD
+    out = []
+    for words in frames:
+        cpu = Cpu(cave_elf)
+        cpu.mem = mem
+        cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
+        cpu.wr(STATE + 0x1C, 4, 16)
+        cpu.wr(STATE + 0x20, 4, 256)
+        cpu.wr(TOC - 0x77F8, 4, OBJ)
+        cpu.wr(TOC - 0x7840, 4, VRAM_SLOT)
+        cpu.wr(VRAM_SLOT, 4, VRAM)
+        for k in range(0x17A0 // 4):
+            cpu.wr(OBJ + 0x60 + 4 * k, 4, words[k] if k < len(words) else 0)
+        for row in range(222, 240):  # the black margin, written as `black` in every column
+            for col in range(O.SCAN_PX):
+                cpu.wr(VRAM + (row << 11) + 2 * col, 2, black)
+        cpu.wr(VRAM + (100 << 11), 2, 0x1234)  # some content above
+        for row in range(8, 222):
+            cpu.wr(VRAM + (row << 11) + 2 * (O.SCAN_PX - 1), 2, 0x1234)
+        cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = (
+            struct.unpack(">f", struct.pack(">f", v))[0] for v in (SOTN["x1"], SOTN["x2"], SOTN["y1"], SOTN["y2"]))
+        cpu.run(O.HOOK_VA, {O.RESUME})
+        out.append({"x1": cpu.f[6], "x2": cpu.f[5], "y1": cpu.f[7], "y2": cpu.f[4]})
+    assert _same(out[-1], _reference(SOTN, 8, 222, 240))

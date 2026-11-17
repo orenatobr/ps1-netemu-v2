@@ -58,6 +58,8 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
             w = (14 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | _i16(a[2])
         elif m == "ori":
             w = (24 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | _i16(a[2])
+        elif m == "andi.":  # andi. ra,rs,ui (also sets cr0)
+            w = (28 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | _i16(a[2])
         elif m == "mr":
             w = (31 << 26) | (_r(a[1]) << 21) | (_r(a[0]) << 16) | (_r(a[1]) << 11) | (444 << 1)
         elif m == "add":
