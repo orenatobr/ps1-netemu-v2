@@ -3,9 +3,10 @@
 The display handler (0x113f0c) ends by storing the picture quad (x1, x2, y1, y2 in f6, f5, f7, f4) at
 0x114148. The hook there jumps here first. The GPU packet buffer (the object behind TOC slot -0x77f8,
 commands from +0x60) holds the draw-area commands GP0 E3 (top left) and E4 (bottom right). The code scans
-it for E3/E4 pairs with a plausible size (16..256 lines, 128..640 wide: a full-VRAM reset is not one) whose
-top lies in the first buffer (above the declared height) and JOINS them: the window is from the lowest top to
-the highest bottom. A game that draws its scene and its menu as two areas (Final Fantasy VII battles: 320x158
+it for E3/E4 pairs with a plausible size (16..256 lines, 128..640 wide: a full-VRAM reset is not one), turns
+their rows into rows of the buffer on display (minus its first VRAM row, r22 + 4: games flip between two
+buffers and the other one's areas say nothing) and JOINS those that fall in the display: the window is from
+the lowest top to the highest bottom. A game that draws its scene and its menu as two areas (Final Fantasy VII battles: 320x158
 plus 320x74) keeps both; taking only the tallest cut the menu and zoomed the scene to 1.45x. That window is
 intersected with the window the base formula already applied, and y1/y2 are rescaled so the result fills the
 screen. Only a quarter of the extra zoom goes to x (the rest is vertical), so the picture stays inside the
@@ -29,7 +30,7 @@ HOOK_VA, HOOK_STOCK = 0x114148, 0xD0D401AC  # stfs f6,0x1ac(r20)
 RESUME = 0x11414C
 OBJ_TOC = -0x77F8
 FRAME = 0x140
-SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]
 SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
 CONSTS = (-1.0, 1.0, 2.0, 0.5, 0.25, 0.75)  # data offsets 0, 4, 8, 12, 16, 20
 STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
@@ -47,6 +48,7 @@ def program(data_va: int) -> list[tuple]:
         ("label", "hok"),
         ("cmpwi", "r11", 200), ("blt", "done"), ("cmpwi", "r11", 256), ("bgt", "done"),
         # scan the packet buffer for E3/E4 pairs
+        ("lwz", "r14", 4, "r22"),  # the first VRAM row of the buffer on display
         ("lwz", "r3", OBJ_TOC, "r2"), ("addi", "r3", "r3", 0x60), ("addi", "r4", "r3", 0x17A0),
         ("li", "r7", -1), ("li", "r9", 0), ("li", "r10", 0x7FFF),  # r9 = highest bottom, r10 = lowest top
         ("label", "loop"),
@@ -61,10 +63,15 @@ def program(data_va: int) -> list[tuple]:
         ("subf", "r0", "r8", "r0"),  # x2 - x1 (the width minus one)
         ("cmpwi", "r12", 16), ("blt", "next"), ("cmpwi", "r12", 256), ("bgt", "next"),
         ("cmpwi", "r0", 127), ("blt", "next"), ("cmpwi", "r0", 639), ("bgt", "next"),
-        ("cmpw", "r7", "r11"), ("bge", "next"),  # the second buffer sits below the display
+        # rows relative to the buffer on display: an area of the other buffer falls outside [0, H) and says
+        # nothing about this one
+        ("subf", "r7", "r14", "r7"), ("add", "r12", "r7", "r12"),
+        ("cmpwi", "r12", 0), ("ble", "next"), ("cmpw", "r7", "r11"), ("bge", "next"),
+        ("cmpwi", "r7", 0), ("bge", "tp0"), ("li", "r7", 0),
+        ("label", "tp0"),
         ("cmpw", "r7", "r10"), ("bge", "topok"), ("mr", "r10", "r7"),
         ("label", "topok"),
-        ("add", "r12", "r7", "r12"), ("cmpw", "r12", "r9"), ("ble", "next"), ("mr", "r9", "r12"),
+        ("cmpw", "r12", "r9"), ("ble", "next"), ("mr", "r9", "r12"),
         ("label", "next"),
         ("li", "r7", -1),
         ("label", "adv"),

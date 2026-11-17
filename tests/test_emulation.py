@@ -386,7 +386,7 @@ def _reference(q, a, b, h):
     return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
 
 
-def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None):
+def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0):
     """Run the hook once per entry of `frames` (each a list of packet-buffer words), sharing memory so the
     remembered window carries over, and return the quad after each call."""
     mem = {} if mem is None else mem
@@ -397,6 +397,7 @@ def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None):
         cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
         cpu.wr(STATE + 0x1C, 4, y1d)
         cpu.wr(STATE + 0x20, 4, y2d)
+        cpu.wr(STATE + 0x04, 4, y0)  # first VRAM row of the buffer on display
         cpu.wr(TOC - 0x77F8, 4, OBJ)
         for k in range(0x17A0 // 4):  # the buffer holds only this frame's words
             cpu.wr(OBJ + 0x60 + 4 * k, 4, words[k] if k < len(words) else 0)
@@ -416,9 +417,9 @@ def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None):
     return out
 
 
-def _overscan(elf, words, q=SOTN, y1d=16, y2d=256):
+def _overscan(elf, words, q=SOTN, y1d=16, y2d=256, y0=0):
     """The quad after the window has settled (O.HOLD identical frames)."""
-    return _frames(elf, [words] * O.HOLD, q=q, y1d=y1d, y2d=y2d)[-1]
+    return _frames(elf, [words] * O.HOLD, q=q, y1d=y1d, y2d=y2d, y0=y0)[-1]
 
 
 def _same(a, b, tol=1e-4):
@@ -492,9 +493,31 @@ def test_only_a_quarter_of_the_extra_zoom_reaches_the_width(cave_elf):
     assert abs(got["x2"] / SOTN["x2"] - (1 + (1 / zy - 1) / 4)) < 1e-3
 
 
-def test_areas_in_the_second_buffer_are_not_joined(cave_elf):
+def test_areas_of_the_buffer_not_on_display_are_not_joined(cave_elf):
     words = [_e3(0, 20), _e4(255, 226), _e3(0, 248), _e4(255, 479)]
     assert _same(_overscan(cave_elf, words), _reference(SOTN, 20, 227, 240))
+
+
+def test_final_fantasy_vii_battle_shown_from_the_second_buffer(cave_elf):
+    """Paused on the console with the menu cut at the bottom: the buffer on display starts at row 240, the scene is
+    drawn as rows 248..405 and the menu as 406..479 (local rows 8..165 and 166..239). Comparing the rows with
+    row 0 instead of the display start dropped the menu and kept a stale window."""
+    words = [_e3(0, 248), _e4(319, 405), _e3(0, 406), _e4(319, 479)]
+    got = _overscan(cave_elf, words, y0=240)
+    assert _same(got, _reference(SOTN, 8, 240, 240))
+
+
+def test_a_frame_that_only_shows_the_other_buffers_areas_changes_nothing(cave_elf):
+    """The packet buffer of a frame can hold only the areas of the other buffer: they say nothing about this one."""
+    words = [_e3(0, 8), _e4(319, 165)]
+    assert _same(_overscan(cave_elf, words, y0=240), SOTN)
+
+
+def test_the_window_stays_while_frames_show_only_part_of_the_areas(cave_elf):
+    full = [_e3(0, 8), _e4(319, 165), _e3(0, 166), _e4(319, 239)]
+    scene_only, menu_only = [_e3(0, 8), _e4(319, 165)], [_e3(0, 166), _e4(319, 239)]
+    out = _frames(cave_elf, [full] * O.HOLD + [scene_only, menu_only] * 20)
+    assert all(_same(q, _reference(SOTN, 8, 240, 240)) for q in out[O.HOLD - 1:])  # no jumps while the areas alternate
 
 
 def test_a_degenerate_quad_is_left_alone(cave_elf):
