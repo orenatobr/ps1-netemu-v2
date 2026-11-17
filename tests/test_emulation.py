@@ -75,7 +75,7 @@ class Cpu:
 
     def run(self, pc: int, stop: set[int]) -> int:
         """Execute from `pc` until pc lands in `stop`; returns that pc."""
-        for _ in range(60000):
+        for _ in range(900000):
             if pc in stop:
                 return pc
             w = self.code(pc)
@@ -366,6 +366,7 @@ def test_every_probe_closes_the_file_it_opened(cave_elf):
 import cave_overscan as O
 
 OBJ, OUT, STATE = 0x40000000, 0x30000000, 0x31000000
+VRAM, VRAM_SLOT = 0x50000000, 0x31100000
 SOTN = {"x1": -0.8694444, "x2": 0.9013889, "y1": -1.0, "y2": 1.0}  # what the base formula gives a game showing all 240 lines
 
 
@@ -386,7 +387,7 @@ def _reference(q, a, b, h):
     return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
 
 
-def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0):
+def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0, vram_rows=None, width=32):
     """Run the hook once per entry of `frames` (each a list of packet-buffer words), sharing memory so the
     remembered window carries over, and return the quad after each call."""
     mem = {} if mem is None else mem
@@ -398,13 +399,19 @@ def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0):
         cpu.wr(STATE + 0x1C, 4, y1d)
         cpu.wr(STATE + 0x20, 4, y2d)
         cpu.wr(STATE + 0x04, 4, y0)  # first VRAM row of the buffer on display
+        cpu.wr(STATE + 0x08, 4, width)
+        if vram_rows is not None:  # the rows (local to the display) that hold a non-black pixel, in the last column
+            cpu.wr(TOC - 0x7830, 4, VRAM_SLOT)
+            cpu.wr(VRAM_SLOT, 4, VRAM)
+            for row in vram_rows:
+                cpu.wr(VRAM + ((y0 + row) << 11) + 2 * (width - 1), 2, 0x1234)
         cpu.wr(TOC - 0x77F8, 4, OBJ)
         for k in range(0x17A0 // 4):  # the buffer holds only this frame's words
             cpu.wr(OBJ + 0x60 + 4 * k, 4, words[k] if k < len(words) else 0)
         cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = (
             struct.unpack(">f", struct.pack(">f", v))[0] for v in (q["x1"], q["x2"], q["y1"], q["y2"]))
         sent_f = {i: 100.5 + i for i in (0, 1, 2, 3, 8, 9, 10, 13)}
-        sent_r = {i: 0x5000 + i for i in (0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)}
+        sent_r = {i: 0x5000 + i for i in (0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19)}
         for i, v in sent_f.items():
             cpu.f[i] = v
         for i, v in sent_r.items():
@@ -417,9 +424,9 @@ def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None, y0=0):
     return out
 
 
-def _overscan(elf, words, q=SOTN, y1d=16, y2d=256, y0=0):
+def _overscan(elf, words, q=SOTN, y1d=16, y2d=256, y0=0, vram_rows=None):
     """The quad after the window has settled (O.HOLD identical frames)."""
-    return _frames(elf, [words] * O.HOLD, q=q, y1d=y1d, y2d=y2d, y0=y0)[-1]
+    return _frames(elf, [words] * O.HOLD, q=q, y1d=y1d, y2d=y2d, y0=y0, vram_rows=vram_rows)[-1]
 
 
 def _same(a, b, tol=1e-4):
@@ -915,3 +922,48 @@ def test_the_base_formula_still_crops_lines_above_the_visible_start(elfs):
     _, patched = elfs
     y1, y2 = _base_quad(patched, 8, 248)
     assert y1 < -1.0 and y2 == 1.0  # lines 8..15 are off the TV area
+
+
+# ---- black rows at the edges of the window (read from VRAM) ----------------------------------
+
+FF7_BATTLE = [_e3(0, 8), _e4(319, 165), _e3(0, 166), _e4(319, 239)]
+
+
+def test_black_rows_at_the_bottom_of_the_window_are_trimmed(cave_elf):
+    """Final Fantasy VII battle: the areas reach row 239 but the game draws only up to row 221."""
+    got = _overscan(cave_elf, FF7_BATTLE, vram_rows=range(8, 222))
+    assert _same(got, _reference(SOTN, 8, 222, 240))
+
+
+def test_black_rows_at_the_top_are_trimmed_too(cave_elf):
+    got = _overscan(cave_elf, FF7_BATTLE, vram_rows=range(20, 240))
+    assert _same(got, _reference(SOTN, 20, 240, 240))
+
+
+def test_a_row_with_any_content_stops_the_trim(cave_elf):
+    got = _overscan(cave_elf, FF7_BATTLE, vram_rows=list(range(8, 222)) + [235])
+    assert _same(got, _reference(SOTN, 8, 236, 240))  # only rows 236..239 above it are black
+
+
+def test_at_most_32_rows_are_trimmed_from_each_side(cave_elf):
+    got = _overscan(cave_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=range(40, 220))
+    assert _same(got, _reference(SOTN, 32, 220, 240))  # rows 0..39 are black but only 32 are trimmed
+
+
+def test_a_trim_that_would_leave_under_three_quarters_is_not_trusted(cave_elf):
+    got = _overscan(cave_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=range(40, 200))
+    assert _same(got, SOTN)  # 32 + 32 rows trimmed would leave 176 of 240
+
+
+def test_a_black_picture_is_left_alone(cave_elf):
+    """A fade to black must not make the window collapse: trimming 32 + 32 rows falls under the three quarter limit."""
+    assert _same(_overscan(cave_elf, [_e3(0, 0), _e4(319, 239)], vram_rows=[]), SOTN)
+
+
+def test_without_a_readable_vram_nothing_is_trimmed(cave_elf):
+    assert _same(_overscan(cave_elf, FF7_BATTLE), _reference(SOTN, 8, 240, 240))
+
+
+def test_the_trim_works_on_the_buffer_on_display(cave_elf):
+    got = _overscan(cave_elf, [_e3(0, 248), _e4(319, 405), _e3(0, 406), _e4(319, 479)], y0=240, vram_rows=range(8, 222))
+    assert _same(got, _reference(SOTN, 8, 222, 240))

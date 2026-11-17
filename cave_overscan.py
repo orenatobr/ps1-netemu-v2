@@ -29,8 +29,10 @@ from ppcasm import assemble
 HOOK_VA, HOOK_STOCK = 0x114148, 0xD0D401AC  # stfs f6,0x1ac(r20)
 RESUME = 0x11414C
 OBJ_TOC = -0x77F8
-FRAME = 0x140
-SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]
+FRAME = 0x1A0
+SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19]
+SAVE_F_AT = 0x110  # the float saves start here, after the 17 register saves (0x80 + 8 * 17)
+MAX_TRIM = 32  # black rows trimmed from each side of the window at most
 SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
 CONSTS = (-1.0, 1.0, 2.0, 0.5, 0.25, 0.75)  # data offsets 0, 4, 8, 12, 16, 20
 STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
@@ -41,7 +43,7 @@ def program(data_va: int) -> list[tuple]:
     hi, lo = (data_va >> 16) & 0xFFFF, data_va & 0xFFFF
     p: list[tuple] = [("stdu", "r1", -FRAME, "r1")]
     p += [("std", f"r{r}", 0x80 + 8 * k, "r1") for k, r in enumerate(SAVE_R)]
-    p += [("stfd", f"f{f}", 0xE0 + 8 * j, "r1") for j, f in enumerate(SAVE_F)]
+    p += [("stfd", f"f{f}", SAVE_F_AT + 8 * j, "r1") for j, f in enumerate(SAVE_F)]
     p += [  # H = declared lines (Y2 - Y1, or 240 when Y2 is 0)
         ("lwz", "r9", 0x1C, "r22"), ("lwz", "r10", 0x20, "r22"), ("li", "r11", 240),
         ("cmpwi", "r10", 0), ("beq", "hok"), ("subf", "r11", "r9", "r10"),
@@ -85,6 +87,37 @@ def program(data_va: int) -> list[tuple]:
         ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
         ("label", "b1"),
         ("cmpw", "r9", "r0"), ("ble", "noc"),
+        # black rows at the edges: the draw areas say where the game MAY draw, the VRAM says where it did. Rows made
+        # only of black pixels (the low 15 bits are 0) are trimmed from the bottom, then from the top, at most
+        # MAX_TRIM each. Without a readable VRAM (base 0) or width nothing happens.
+        ("lwz", "r15", -0x7830, "r2"), ("lwz", "r15", 0, "r15"), ("cmpwi", "r15", 0), ("beq", "notrim"),
+        ("lwz", "r16", 0, "r22"), ("rlwinm", "r16", "r16", 1, 0, 30),  # first column, in bytes
+        ("lwz", "r17", 8, "r22"), ("cmpwi", "r17", 0), ("ble", "notrim"), ("cmpwi", "r17", 1024), ("bgt", "notrim"),
+        ("li", "r8", 0),  # pass 0 trims the bottom, pass 1 the top
+        ("label", "pass"),
+        ("li", "r4", 0), ("cmpwi", "r8", 0), ("bne", "topstart"),
+        ("addi", "r3", "r9", -1), ("li", "r7", -1), ("b", "rowloop"),
+        ("label", "topstart"),
+        ("mr", "r3", "r10"), ("li", "r7", 1),
+        ("label", "rowloop"),
+        ("cmpwi", "r4", MAX_TRIM), ("bge", "passend"),
+        ("cmpwi", "r8", 0), ("bne", "chktop"),
+        ("cmpw", "r3", "r10"), ("ble", "passend"), ("b", "scan"),
+        ("label", "chktop"),
+        ("addi", "r19", "r9", -1), ("cmpw", "r3", "r19"), ("bge", "passend"),
+        ("label", "scan"),
+        ("add", "r18", "r14", "r3"), ("rlwinm", "r18", "r18", 11, 0, 20), ("add", "r18", "r18", "r15"),
+        ("add", "r18", "r18", "r16"), ("mr", "r19", "r17"),
+        ("label", "px"),
+        ("lhz", "r0", 0, "r18"), ("rlwinm", "r0", "r0", 0, 17, 31), ("cmpwi", "r0", 0), ("bne", "passend"),
+        ("addi", "r18", "r18", 2), ("addi", "r19", "r19", -1), ("cmpwi", "r19", 0), ("bgt", "px"),
+        ("addi", "r4", "r4", 1), ("add", "r3", "r3", "r7"), ("b", "rowloop"),
+        ("label", "passend"),
+        ("cmpwi", "r8", 0), ("bne", "applytop"),
+        ("subf", "r9", "r4", "r9"), ("li", "r8", 1), ("b", "pass"),
+        ("label", "applytop"),
+        ("add", "r10", "r10", "r4"),
+        ("label", "notrim"),
         # ponytail: 3/4 of the display is a guess (max zoom 1.33), not measured on a game with a small real picture;
         # raise or drop it if a game legitimately draws less (the picture is then left as the base formula shows it)
         ("subf", "r7", "r10", "r9"), ("rlwinm", "r8", "r11", 30, 2, 31), ("subf", "r8", "r8", "r11"),
@@ -131,7 +164,7 @@ def program(data_va: int) -> list[tuple]:
         ("fmuls", "f6", "f6", "f3"), ("fmuls", "f5", "f5", "f3"),
         ("label", "done"),
     ]
-    p += [("lfd", f"f{f}", 0xE0 + 8 * j, "r1") for j, f in enumerate(SAVE_F)]
+    p += [("lfd", f"f{f}", SAVE_F_AT + 8 * j, "r1") for j, f in enumerate(SAVE_F)]
     p += [("ld", f"r{r}", 0x80 + 8 * k, "r1") for k, r in enumerate(SAVE_R)]
     p += [("addi", "r1", "r1", FRAME), ("stfs", "f6", 0x1AC, "r20"), ("b", RESUME)]
     return p
