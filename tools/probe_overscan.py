@@ -27,10 +27,12 @@ BUF_OFF, BUF_LEN = 0x60, 0x17A0
 
 def _read(host: str, pid: str, addr: int, n: int) -> bytes:
     """`n` bytes (at most 256) at `addr`."""
-    with urllib.request.urlopen(f"http://{host}/getmem.ps3mapi?proc={pid}&addr={addr:x}&len={n:x}", timeout=10) as r:
+    with urllib.request.urlopen(f"http://{host}/getmem.ps3mapi?proc={pid}&addr={addr:x}&len={n}", timeout=10) as r:
         page = r.read().decode("latin1")
-    hexes = re.findall(r"\b[0-9A-Fa-f]{2}\b", re.sub(r"<[^>]*>", " ", page.split("</form>")[-1]))
-    return bytes(int(h, 16) for h in hexes[-n:])
+    dump = re.findall(rf"\b[0-9A-Fa-f]{{{2 * n}}}\b", re.sub(r"<[^>]*>", " ", page))  # len is decimal; bytes come as one hex string
+    if not dump:
+        raise RuntimeError(f"no {n} byte dump for 0x{addr:x} in the webMAN page")
+    return bytes.fromhex(dump[-1])
 
 
 def read_block(host: str, pid: str, addr: int, n: int) -> bytes:
