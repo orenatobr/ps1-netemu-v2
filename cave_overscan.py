@@ -3,10 +3,14 @@
 The display handler (0x113f0c) ends by storing the picture quad (x1, x2, y1, y2 in f6, f5, f7, f4) at
 0x114148. The hook there jumps here first. The GPU packet buffer (the object behind TOC slot -0x77f8,
 commands from +0x60) holds the draw-area commands GP0 E3 (top left) and E4 (bottom right). The code scans
-it for E3/E4 pairs with a plausible size (100..256 lines, 128..640 wide: a full-VRAM reset is not one),
-keeps the tallest (the lowest top on a tie) and treats its rows as the picture. That window is intersected
-with the overscan window the stock formula already applied, and y1/y2 are rescaled so the result fills the
-screen. Half of the extra zoom goes to x, so the distortion is shared between both axes.
+it for E3/E4 pairs with a plausible size (16..256 lines, 128..640 wide: a full-VRAM reset is not one) whose
+top lies in the first buffer (above the declared height) and JOINS them: the window is from the lowest top to
+the highest bottom. A game that draws its scene and its menu as two areas (Final Fantasy VII battles: 320x158
+plus 320x74) keeps both; taking only the tallest cut the menu and zoomed the scene to 1.45x. That window is
+intersected with the window the base formula already applied, and y1/y2 are rescaled so the result fills the
+screen. Only a quarter of the extra zoom goes to x (the rest is vertical), so the picture stays inside the
+4:3 frame. A window shorter than three quarters of the display is not trusted (that zoom would push the
+width out of the frame) and is ignored.
 
 The window is remembered between calls (five words at STATE_VA): it grows at once and shrinks only after
 HOLD consecutive display commands asked for the same smaller one; with no pair the window in use stays.
@@ -27,7 +31,7 @@ OBJ_TOC = -0x77F8
 FRAME = 0x140
 SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
-CONSTS = (-1.0, 1.0, 2.0, 0.5)  # data offsets 0, 4, 8, 12
+CONSTS = (-1.0, 1.0, 2.0, 0.5, 0.25, 0.75)  # data offsets 0, 4, 8, 12, 16, 20
 STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
 HOLD = 24  # display commands in a row before the window shrinks
 
@@ -44,7 +48,7 @@ def program(data_va: int) -> list[tuple]:
         ("cmpwi", "r11", 200), ("blt", "done"), ("cmpwi", "r11", 256), ("bgt", "done"),
         # scan the packet buffer for E3/E4 pairs
         ("lwz", "r3", OBJ_TOC, "r2"), ("addi", "r3", "r3", 0x60), ("addi", "r4", "r3", 0x17A0),
-        ("li", "r7", -1), ("li", "r9", 0), ("li", "r10", 0),
+        ("li", "r7", -1), ("li", "r9", 0), ("li", "r10", 0x7FFF),  # r9 = highest bottom, r10 = lowest top
         ("label", "loop"),
         ("lwz", "r5", 0, "r3"), ("rlwinm", "r6", "r5", 8, 24, 31),
         ("cmpwi", "r6", 0xE3), ("bne", "note3"),
@@ -55,24 +59,28 @@ def program(data_va: int) -> list[tuple]:
         ("rlwinm", "r12", "r5", 22, 22, 31), ("rlwinm", "r0", "r5", 0, 22, 31),
         ("subf", "r12", "r7", "r12"), ("addi", "r12", "r12", 1),
         ("subf", "r0", "r8", "r0"),  # x2 - x1 (the width minus one)
-        ("cmpwi", "r12", 100), ("blt", "next"), ("cmpwi", "r12", 256), ("bgt", "next"),
+        ("cmpwi", "r12", 16), ("blt", "next"), ("cmpwi", "r12", 256), ("bgt", "next"),
         ("cmpwi", "r0", 127), ("blt", "next"), ("cmpwi", "r0", 639), ("bgt", "next"),
-        ("cmpw", "r12", "r9"), ("blt", "next"), ("bgt", "take"), ("cmpw", "r7", "r10"), ("bge", "next"),
-        ("label", "take"),
-        ("mr", "r9", "r12"), ("mr", "r10", "r7"),
+        ("cmpw", "r7", "r11"), ("bge", "next"),  # the second buffer sits below the display
+        ("cmpw", "r7", "r10"), ("bge", "topok"), ("mr", "r10", "r7"),
+        ("label", "topok"),
+        ("add", "r12", "r7", "r12"), ("cmpw", "r12", "r9"), ("ble", "next"), ("mr", "r9", "r12"),
         ("label", "next"),
         ("li", "r7", -1),
         ("label", "adv"),
         ("addi", "r3", "r3", 4), ("cmpw", "r3", "r4"), ("blt", "loop"),
-        # r10 = top row, r9 = height (0 when no pair was found), r11 = H
+        # r10 = top row, r9 = bottom row (0 when no pair was found), r11 = H
         ("lis", "r12", (STATE_VA >> 16) & 0xFFFF), ("ori", "r12", "r12", STATE_VA & 0xFFFF),
         ("lwz", "r5", 0, "r12"), ("lwz", "r6", 4, "r12"),  # the window in use: [a, b)
         ("cmpwi", "r9", 0), ("beq", "noc"),
         ("rlwinm", "r0", "r11", 31, 1, 31),  # H / 2
         ("cmpw", "r10", "r0"), ("bge", "noc"),
-        ("add", "r9", "r10", "r9"), ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
+        ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
         ("label", "b1"),
         ("cmpw", "r9", "r0"), ("ble", "noc"),
+        # a window under three quarters of the display would zoom too much: not trusted
+        ("subf", "r7", "r10", "r9"), ("rlwinm", "r8", "r11", 30, 2, 31), ("subf", "r8", "r8", "r11"),
+        ("cmpw", "r7", "r8"), ("blt", "noc"),
         # a usable candidate [r10, r9): it grows the window at once and shrinks it only after HOLD
         # display commands in a row asked for the same smaller one, so a scene that alternates
         # areas (or has none for a while) cannot make the picture jump
@@ -107,7 +115,7 @@ def program(data_va: int) -> list[tuple]:
         ("fsubs", "f10", "f1", "f0"),  # t1 - t0
         ("lfs", "f2", 12, "r12"), ("fcmpu", "f10", "f2"), ("blt", "done"),
         ("fsubs", "f3", "f9", "f8"), ("fdivs", "f3", "f3", "f10"),  # s = stock window / new window
-        ("fmadds", "f3", "f3", "f2", "f2"),  # zoom of x = (s + 1) / 2
+        ("lfs", "f2", 16, "r12"), ("lfs", "f13", 20, "r12"), ("fmadds", "f3", "f3", "f2", "f13"),  # zoom of x = 1 + (s - 1) / 4
         ("lfs", "f2", 4, "r12"), ("fsubs", "f2", "f2", "f0"), ("fdivs", "f2", "f2", "f10"),
         ("lfs", "f13", 8, "r12"), ("fmuls", "f2", "f2", "f13"), ("lfs", "f13", 0, "r12"), ("fadds", "f4", "f13", "f2"),
         ("fdivs", "f0", "f0", "f10"), ("lfs", "f13", 8, "r12"), ("fmuls", "f0", "f0", "f13"),

@@ -136,6 +136,8 @@ class Cpu:
                     self.f[rt] = s32(self.f[fa] * self.f[fc])
                 elif op == 59 and xo5 == 29:
                     self.f[rt] = s32(self.f[fa] * self.f[fc] + self.f[fb])
+                elif op == 59 and xo5 == 28:  # fmsubs
+                    self.f[rt] = s32(self.f[fa] * self.f[fc] - self.f[fb])
                 elif op == 63 and xo5 == 23:  # fsel
                     self.f[rt] = self.f[fc] if self.f[fa] >= 0 else self.f[fb]
                 elif op == 63 and xo10 == 0:  # fcmpu
@@ -143,6 +145,8 @@ class Cpu:
                     self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
                 elif op == 63 and xo10 == 846:  # fcfid
                     self.f[rt] = float(_s64(struct.unpack(">Q", struct.pack(">d", self.f[fb]))[0]))
+                elif op == 63 and xo10 == 72:  # fmr
+                    self.f[rt] = self.f[fb]
                 elif op == 63 and xo10 == 12:  # frsp
                     self.f[rt] = s32(self.f[fb])
                 else:
@@ -362,7 +366,7 @@ def test_every_probe_closes_the_file_it_opened(cave_elf):
 import cave_overscan as O
 
 OBJ, OUT, STATE = 0x40000000, 0x30000000, 0x31000000
-SOTN = {"x1": -0.8694444, "x2": 0.9013889, "y1": -1.0714286, "y2": 1.0714286}
+SOTN = {"x1": -0.8694444, "x2": 0.9013889, "y1": -1.0, "y2": 1.0}  # what the base formula gives a game showing all 240 lines
 
 
 def _e3(x, y):
@@ -378,7 +382,7 @@ def _reference(q, a, b, h):
     t0, t1 = max(a / h, tw0), min(b / h, tw1)
     ln = t1 - t0
     s = (tw1 - tw0) / ln
-    zx = (s + 1) / 2
+    zx = 1 + (s - 1) / 4  # only a quarter of the extra zoom goes to the width: the picture stays 4:3
     return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
 
 
@@ -446,19 +450,56 @@ def test_a_top_in_the_lower_half_is_ignored(cave_elf):
     assert _same(_overscan(cave_elf, [_e3(0, 150), _e4(255, 250)]), SOTN)
 
 
-def test_the_tallest_area_wins_and_the_bottom_is_clamped(cave_elf):
+def test_the_areas_are_joined_and_the_bottom_is_clamped(cave_elf):
     words = [_e3(0, 100), _e4(255, 219), _e3(0, 10), _e4(255, 250)]
     assert _same(_overscan(cave_elf, words), _reference(SOTN, 10, 240, 240))
+
+
+def test_final_fantasy_vii_battle_keeps_the_menu_below_the_scene(cave_elf):
+    """Measured on the console: the scene is drawn as 320x158 (rows 8..165) and the menu as 320x74 (rows 166..239);
+    keeping only the taller one cut the menu and zoomed the scene to 1.45x."""
+    words = [_e3(0, 8), _e4(319, 165), _e3(0, 166), _e4(319, 239), _e3(0, 248), _e4(319, 405)]
+    got = _overscan(cave_elf, words)
+    assert _same(got, _reference(SOTN, 8, 240, 240))
+    assert got["y2"] - got["y1"] < 2.1  # a 3% zoom, not 45%
+    assert abs(got["x2"] / SOTN["x2"] - 1) < 0.01  # and the width stays inside the 4:3 frame
+
+
+def test_megaman_x5_draws_all_240_lines_and_loses_none(cave_elf):
+    words = [_e3(0, 0), _e4(319, 239), _e3(0, 240), _e4(319, 479)]
+    assert _same(_overscan(cave_elf, words), SOTN)
+
+
+def test_xenogears_keeps_every_line_the_game_declares(cave_elf):
+    """320x224 areas in a 216 line display: the window is the display, not the taller drawing."""
+    words = [_e3(0, 0), _e4(319, 223), _e3(0, 256), _e4(319, 479)]
+    assert _same(_overscan(cave_elf, words, y1d=28, y2d=244), SOTN)
+
+
+def test_xenogears_battle_keeps_the_part_drawn_apart_at_the_bottom(cave_elf):
+    words = [_e3(0, 0), _e4(319, 170), _e3(0, 171), _e4(319, 223)]
+    assert _same(_overscan(cave_elf, words, y1d=28, y2d=244), SOTN)
+
+
+def test_a_window_much_smaller_than_the_display_is_left_alone(cave_elf):
+    """A zoom beyond a third would push the width out of the 4:3 frame."""
+    assert _same(_overscan(cave_elf, [_e3(0, 60), _e4(319, 179)]), SOTN)
+
+
+def test_only_a_quarter_of_the_extra_zoom_reaches_the_width(cave_elf):
+    got = _overscan(cave_elf, [_e3(0, 20), _e4(255, 226)])
+    zy = 2 / (got["y2"] - got["y1"])  # 207 of 240 lines fill the screen
+    assert abs(got["x2"] / SOTN["x2"] - (1 + (1 / zy - 1) / 4)) < 1e-3
+
+
+def test_areas_in_the_second_buffer_are_not_joined(cave_elf):
+    words = [_e3(0, 20), _e4(255, 226), _e3(0, 248), _e4(255, 479)]
+    assert _same(_overscan(cave_elf, words), _reference(SOTN, 20, 227, 240))
 
 
 def test_a_degenerate_quad_is_left_alone(cave_elf):
     q = {"x1": -0.9, "x2": 0.9, "y1": 0.0, "y2": 0.1}
     assert _same(_overscan(cave_elf, [_e3(0, 20), _e4(255, 226)], q=q), q)
-
-
-def test_the_stock_overscan_window_is_kept_when_the_game_draws_more(cave_elf):
-    got = _overscan(cave_elf, [_e3(0, 2), _e4(255, 237)])  # rows 2..238: wider than the 8..232 window
-    assert _same(got, SOTN)
 
 
 def test_the_window_shrinks_only_after_hold_frames_in_a_row(cave_elf):
@@ -488,10 +529,10 @@ def test_a_larger_area_restores_the_picture_at_once(cave_elf):
 
 
 def test_a_different_smaller_area_needs_its_own_hold(cave_elf):
-    a, b = [_e3(0, 20), _e4(255, 226)], [_e3(0, 40), _e4(255, 200)]
+    a, b = [_e3(0, 20), _e4(255, 226)], [_e3(0, 30), _e4(255, 220)]
     out = _frames(cave_elf, [a] * O.HOLD + [b] * (O.HOLD - 1) + [b])
     assert _same(out[O.HOLD + O.HOLD - 2], _reference(SOTN, 20, 227, 240))  # one short: still window a
-    assert _same(out[-1], _reference(SOTN, 40, 201, 240))
+    assert _same(out[-1], _reference(SOTN, 30, 221, 240))
 
 
 # ---- one memory card per game ----------------------------------------------------------------
@@ -821,3 +862,33 @@ def test_the_name_given_to_slot_1_has_the_extension_like_the_one_in_slot_2(cave_
     cpu, _ = _hook(cave_elf, fs, slot2="PS1.VM1")
     assert cpu.cstr(C.NAME_VA) == "SLUS-00662.VM1" and cpu.cstr(cpu.r[27]) == "PS1.VM1"
     assert (CARD_DIR + "SLUS-00662.VM1") in fs.files and (CARD_DIR + "SLUS-00662.VM1.VM1") not in fs.files
+
+
+# ---- the base overscan formula (the NTSC block that feeds the shared code) --------------------
+
+FRAME = 0x32000000
+
+
+def _base_quad(elf, y1d, y2d, height=240):
+    """Run the patched formula from the NTSC entry (0x115ac0) to its first branch after y1/y2 and return them."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+    cpu.wr(FRAME + 0x1C, 4, y1d)
+    cpu.wr(FRAME + 0x20, 4, y2d)
+    cpu.wr(FRAME + 0xC, 4, height)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+    cpu.run(0x115AC0, {0x1158B0})
+    return cpu.f[7], cpu.f[4]
+
+
+@pytest.mark.parametrize("y1d,y2d", [(16, 256), (16, 0), (24, 264), (28, 242)])
+def test_the_base_formula_shows_every_declared_line(elfs, y1d, y2d):
+    _, patched = elfs
+    y1, y2 = _base_quad(patched, y1d, y2d)
+    assert (y1, y2) == (-1.0, 1.0)  # no fixed window: nothing is cut and nothing is left empty
+
+
+def test_the_base_formula_still_crops_lines_above_the_visible_start(elfs):
+    _, patched = elfs
+    y1, y2 = _base_quad(patched, 8, 248)
+    assert y1 < -1.0 and y2 == 1.0  # lines 8..15 are off the TV area

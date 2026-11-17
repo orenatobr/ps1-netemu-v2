@@ -8,11 +8,11 @@ ps1_emu.self but runs ps1_netemu code), then:
     python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
 
 What it does:
-  * vertical "overscan" like DuckStation (NTSC): the picture is shown in a window
-    of 224 video lines starting at line 24, cropping what falls outside. Unlike a
-    fixed window, when a game starts its display AFTER line 24 the window is
-    anchored to the game's own start, so no black bar is left at the top.
-    4:3 width is untouched. PAL keeps the stock behavior.
+  * vertical "overscan" (NTSC): the picture is shown in a window of 240 video lines
+    starting at line 16, so a game that uses all of them loses none (a 224 line window
+    cut 8 lines at the top and the bottom of Megaman X5). When a game starts its display
+    AFTER line 16 the window is anchored to the game's own start, so no black bar is
+    left at the top. 4:3 width is untouched. PAL keeps the stock behavior.
 
 Every code site is read first; nothing is written unless the stock words match.
 """
@@ -27,8 +27,8 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-NTSC_STRETCH = 240 / 224  # nominal NTSC lines / DuckStation overscan window lines (24..248)
-OVERSCAN_START = 24  # first line of the DuckStation NTSC overscan window
+NTSC_STRETCH = 1.0  # nominal NTSC lines / window lines: the window is the 240 nominal lines, nothing is cropped
+OVERSCAN_START = 16  # first visible NTSC line
 
 
 def f32(x: float) -> int:
