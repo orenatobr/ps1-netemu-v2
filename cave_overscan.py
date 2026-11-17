@@ -78,7 +78,8 @@ def program(data_va: int) -> list[tuple]:
         ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
         ("label", "b1"),
         ("cmpw", "r9", "r0"), ("ble", "noc"),
-        # a window under three quarters of the display would zoom too much: not trusted
+        # ponytail: 3/4 of the display is a guess (max zoom 1.33), not measured on a game with a small real picture;
+        # raise or drop it if a game legitimately draws less (the picture is then left as the base formula shows it)
         ("subf", "r7", "r10", "r9"), ("rlwinm", "r8", "r11", 30, 2, 31), ("subf", "r8", "r8", "r11"),
         ("cmpw", "r7", "r8"), ("blt", "noc"),
         # a usable candidate [r10, r9): it grows the window at once and shrinks it only after HOLD
