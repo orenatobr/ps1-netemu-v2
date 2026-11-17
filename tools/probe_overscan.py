@@ -61,10 +61,12 @@ def probe(host: str) -> None:
     obj = struct.unpack(">I", read_block(host, pid, OBJ_SLOT, 4))[0]
     geom = struct.unpack(">I", read_block(host, pid, GEOM_SLOT, 4))[0]
     quad = struct.unpack(">5f", read_block(host, pid, geom + 0x1AC, 20))
-    state = struct.unpack(">5I", read_block(host, pid, STATE_VA, 20))
+    state9 = struct.unpack(">9I", read_block(host, pid, STATE_VA, 36))
+    state = state9[:5]
     words = list(struct.unpack(f">{BUF_LEN // 4}I", read_block(host, pid, obj + BUF_OFF, BUF_LEN)))
     logger.info("quad x1=%.4f x2=%.4f y1=%.4f y2=%.4f (+0x1b8 %.4f)", quad[0], quad[1], quad[2], quad[3], quad[4])
     logger.info("window in use [%d,%d) candidate [%d,%d) count %d", *state)
+    logger.info("display start row %d, H %d, window from the areas before the trim [%d,%d)", *state9[5:])
     areas = draw_areas(words)
     for x1, y1, x2, y2 in sorted(set(areas), key=lambda a: -(a[3] - a[1])):
         logger.info("draw area x %3d..%3d  y %3d..%3d  (%dx%d)  seen %d times", x1, x2, y1, y2, x2 - x1 + 1, y2 - y1 + 1,

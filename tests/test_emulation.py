@@ -999,3 +999,10 @@ def test_black_is_black_in_either_byte_order_with_or_without_the_mask_bit(cave_e
         cpu.run(O.HOOK_VA, {O.RESUME})
         out.append({"x1": cpu.f[6], "x2": cpu.f[5], "y1": cpu.f[7], "y2": cpu.f[4]})
     assert _same(out[-1], _reference(SOTN, 8, 222, 240))
+
+
+def test_a_vram_that_trims_too_much_falls_back_to_the_draw_areas(cave_elf):
+    """Field screens read as all black with the display start the cave assumed: the window must be the one the draw
+    areas give (rows 8..231), not rejected."""
+    got = _overscan(cave_elf, [_e3(0, 8), _e4(319, 231)], vram_rows=[])
+    assert _same(got, _reference(SOTN, 8, 232, 240))

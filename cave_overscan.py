@@ -37,7 +37,7 @@ SCAN_PX = 320  # 16-bit values scanned per row, from the first column of the dis
 SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
 CONSTS = (-1.0, 1.0, 2.0, 0.5, 0.25, 0.75)  # data offsets 0, 4, 8, 12, 16, 20
 STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
-HOLD = 24  # display commands in a row before the window shrinks
+HOLD = 90  # display commands in a row (about 1.5 s) before the window shrinks: slow, so scene changes do not make the picture jump
 
 
 def program(data_va: int) -> list[tuple]:
@@ -91,6 +91,10 @@ def program(data_va: int) -> list[tuple]:
         # black rows at the edges: the draw areas say where the game MAY draw, the VRAM says where it did. Rows made
         # only of black pixels (0x7F7F masks the mask bit whichever byte order the VRAM has) are trimmed from the bottom, then from the top, at most
         # MAX_TRIM each. Without a readable VRAM (base 0) or width nothing happens.
+        # diagnostics for tools/probe_overscan.py (four free words after the state): the display start row, H, and
+        # the window the areas gave before the trim
+        ("stw", "r14", 20, "r12"), ("stw", "r11", 24, "r12"), ("stw", "r10", 28, "r12"), ("stw", "r9", 32, "r12"),
+        ("stw", "r10", 0x78, "r1"), ("stw", "r9", 0x7C, "r1"),  # the window before the trim, to fall back on
         ("lwz", "r15", -0x7840, "r2"), ("lwz", "r15", 0, "r15"), ("cmpwi", "r15", 0), ("beq", "notrim"),  # r27 of 0x114250: the VRAM
         ("lwz", "r16", 0, "r22"), ("rlwinm", "r16", "r16", 1, 0, 30),  # first column, in bytes
         ("li", "r17", SCAN_PX),
@@ -122,7 +126,11 @@ def program(data_va: int) -> list[tuple]:
         # ponytail: 3/4 of the display is a guess (max zoom 1.33), not measured on a game with a small real picture;
         # raise or drop it if a game legitimately draws less (the picture is then left as the base formula shows it)
         ("subf", "r7", "r10", "r9"), ("rlwinm", "r8", "r11", 30, 2, 31), ("subf", "r8", "r8", "r11"),
-        ("cmpw", "r7", "r8"), ("blt", "noc"),
+        ("cmpw", "r7", "r8"), ("bge", "capok"),
+        # too small after the trim (the VRAM did not read as expected): use the draw areas alone, as before the trim
+        ("lwz", "r10", 0x78, "r1"), ("lwz", "r9", 0x7C, "r1"),
+        ("subf", "r7", "r10", "r9"), ("cmpw", "r7", "r8"), ("blt", "noc"),
+        ("label", "capok"),
         # a usable candidate [r10, r9): it grows the window at once and shrinks it only after HOLD
         # display commands in a row asked for the same smaller one, so a scene that alternates
         # areas (or has none for a while) cannot make the picture jump
