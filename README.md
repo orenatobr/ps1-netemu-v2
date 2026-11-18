@@ -7,14 +7,14 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 
 | | Feature | In one line |
 |---|---|---|
-| 1 | **Overscan 4:3, DuckStation style** | The fixed DuckStation window (lines 24 to 248) clipped to the declared lines and stretched over the frame: nothing adjusts while a game runs. |
+| 1 | **Overscan 4:3, DuckStation style** | The fixed DuckStation window (lines 24 to 248) over the frame: nothing adjusts while a game runs. |
 | 2 | **Automatic analog mode** | Switches on when a game talks DualShock; the pad starts digital and digital-only games stay digital. |
 | 3 | **Vibration** | The motors get exactly what the game commands. |
 | 4 | **One memory card per game** | Named after the game's serial, created blank when missing, shown in slot 1 and registered with the system. |
 | 5 | **Multi-disc games share a card** | Disc 2, 3, ... use the card of disc 1. |
 | 6 | **Slot 2 to slot 1 fallback** | A PS1 card in slot 2 moves to slot 1 when slot 1 has none (PS2 cards never count). |
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
-| 8 | **Left stick as d-pad** | In digital mode the left analog stick presses the d-pad, so digital-only games can use either stick. |
+| 8 | **Sticks as buttons** | In digital mode the left analog stick presses the d-pad and the right stick presses L1 (left) and R1 (right). |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
 1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
@@ -24,16 +24,18 @@ in a PowerPC interpreter against the real emulator code).
 ### 1. Overscan 4:3, DuckStation style
 
 DuckStation's default crop ("Overscan") is a fixed window of video lines 24 to 248 (`NTSC_OVERSCAN_VERTICAL_ACTIVE_*` in
-`gpu.cpp`) stretched over the frame. Here the window is also clipped to the lines the game declares with `GP1` (`Y1` to
-`Y2`): a game that declares less (Xenogears, lines 26 to 242) has no black lines at the edges, a game that declares
-more is cropped to the window. `cave_overscan.py` replaces the end of the stock NTSC formula: the top is
-`2*(Y1 - first)/span - 1` and the bottom `2*(Y2 - first)/span - 1`, where `first` is `max(Y1, 24)` and `span` is
-`min(Y2, 248) - first`. The result depends only on what the game declares, so nothing adjusts while you play. The
-width is the emulator's own: the image stays 4:3. PAL keeps the stock formula.
+`gpu.cpp`), stretched over the whole frame whatever the game programs with `GP1` (lines `Y1` to `Y2`). Black lines the
+game leaves outside its display range fall inside the window only where they are within 24..248, so a game that declares
+216 lines (Xenogears, 26 to 242) shows 2 black lines above and 6 below, spread over the frame, not 10 and 14.
+The stock formula mapped lines 16 to 256 one to one. Here the quad ends become `y = 2*s*(Y - 24)/H - 1` with
+`s = 240/224`: the stock doubling (`fadds`) at `0x115894` and `0x1158a0` is a `fmuls` by `f6 = 2*s` and the first line comes
+from a free TOC slot. Lines above 24 and below 248 fall off the frame, as in DuckStation. The result depends only on what
+the game declares, so nothing adjusts while you play. The width is the emulator's own: the image stays 4:3. PAL keeps
+the stock behavior (`f6 = 2`).
 
 Two earlier designs were removed. v2.08 to v2.13 cropped the picture to the draw area (`GP0 E3/E4`) with a remembered
 window: it adjusted in real time and cut Xenogears and Final Fantasy VII battles. v2.14 first anchored the picture to
-the game's first line and stretched it over the frame: it zoomed the declared lines and moved the picture. v2.14 then showed lines 16 to 256 one to one, and later the fixed window 24 to 248 as is: both left thin black bands
+the game's first line and stretched it over the frame: it zoomed the declared lines and moved the picture. v2.14 then showed lines 16 to 256 one to one, which left black bands
 that DuckStation does not show.
 
 ### 2. Automatic analog mode
@@ -100,7 +102,7 @@ inserted into slot 1 through the emulator's own path at `0xb4124`. A card counts
 one build the patch was made for (SHA-256 `27d4121e...ebdd5d`), restores the original with Triangle, and warns on
 screen when the patch is installed without a backup.
 
-### 8. Left stick as d-pad
+### 8. Left stick as d-pad, right stick as L1 and R1
 
 The left stick, not the right one, on purpose: the first version read the right stick and the owner asked for the left one.
 
@@ -173,6 +175,8 @@ PS1_NETEMU_SELF=ps1_netemu.self python -m pytest -q tests
 ```
 
 You need the stock `ps1_netemu.self` (APP, key revision 0x1C); it is not in this repository.
+
+The right stick X axis (`+0xc` of the same copy) presses L1 when it goes left of `0x40` and R1 when it goes right of `0xC0`, again only while the pad is in digital mode.
 
 ### Tests
 

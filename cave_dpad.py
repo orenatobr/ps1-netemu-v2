@@ -7,8 +7,9 @@ SELECT L3 R3 START UP RIGHT DOWN LEFT, then L2 R2 L1 R1 TRIANGLE CIRCLE CROSS SQ
 
   * leaves everything alone when the pad is in analog mode (flag at G + pad * 0xd8 + 0x9c, G from TOC slot
     -0x7ccc: the same flag the protocol handler tests): the game then reads the sticks itself;
-  * otherwise clears the UP / RIGHT / DOWN / LEFT bit when the left stick is past 0x40 / 0xC0, so a game with
-    no analog mode (a digital pad only) can be steered with either stick;
+  * otherwise clears the UP / RIGHT / DOWN / LEFT bit when the left stick is past 0x40 / 0xC0, and L1 / R1 when
+    the right stick X (+0xc) is pushed left / right, so a game with no analog mode (a digital pad only) can be
+    steered with the left stick and has both shoulder buttons on the right one;
   * stores the halfword (the displaced instruction) and continues at 0xec170.
 
 r30 holds pad * 0x94 here; only pads 0 and 1 are told apart (a multitap pad 2 or 3 reads pad 1's flag).
@@ -22,6 +23,7 @@ RESUME = 0xEC170
 PADS_TOC, ANALOG_FLAG, PAD_STRIDE = -0x7CCC, 0x9C, 0xD8
 LOW, HIGH = 0x40, 0xC0
 LEFT, RIGHT, UP, DOWN = 0x7FFF, 0xDFFF, 0xEFFF, 0xBFFF  # the button bit cleared = pressed (active low)
+L1, R1 = 0xFFFB, 0xFFF7  # bits 2 and 3 of the second byte
 
 
 def program() -> list[tuple]:
@@ -35,7 +37,11 @@ def program() -> list[tuple]:
         ("label", "nr"),
         ("lhz", "r9", 0x12, "r29"), ("cmplwi", "r9", LOW), ("bge", "nu"), ("andi.", "r0", "r0", UP),
         ("label", "nu"),
-        ("cmplwi", "r9", HIGH), ("ble", "done"), ("andi.", "r0", "r0", DOWN),
+        ("cmplwi", "r9", HIGH), ("ble", "nd"), ("andi.", "r0", "r0", DOWN),
+        ("label", "nd"),
+        ("lhz", "r9", 0xC, "r29"), ("cmplwi", "r9", LOW), ("bge", "nb"), ("andi.", "r0", "r0", L1),
+        ("label", "nb"),
+        ("cmplwi", "r9", HIGH), ("ble", "done"), ("andi.", "r0", "r0", R1),
         ("label", "done"),
         ("sth", "r0", 0, "r3"), ("b", RESUME),
     ]
