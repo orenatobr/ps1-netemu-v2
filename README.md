@@ -180,6 +180,13 @@ You need the stock `ps1_netemu.self` (APP, key revision 0x1C); it is not in this
 
 The right stick X axis (`+0xc` of the same copy) presses L1 when it goes left of `0x40` and R1 when it goes right of `0xC0`, again only while the pad is in digital mode.
 
+### 9. Top of the picture, adjusted by you
+
+Some games draw their own black bar at the top of the picture (Final Fantasy VII and Castlevania: Symphony of the Night),
+and no fixed window can remove it without cutting the top of a game that uses every line (Megaman X5). Hold **SELECT** and
+press **UP** to start the picture 2 lines lower (up to 24 lines), **DOWN** to go back. A press moves it once, nothing
+moves by itself, and it returns to 0 when the emulator starts again. Only the first pad reads it.
+
 ### Tests
 
 The tests run the **real emulator code** (the original and the patched words) in a small PowerPC interpreter that

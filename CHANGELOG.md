@@ -4,6 +4,7 @@ The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release t
 
 ## v2.14
 - The emulator's vibration switch (`X + 0x84`) is kept on: the actuator clears it on every update and the pad thread no longer sets it.
+- SELECT + UP / DOWN moves the top of the picture by 2 lines (0 to 24) for games that draw their own black bar at the top; nothing adjusts by itself and it resets when the emulator starts.
 - In digital mode the right stick X axis presses L1 (left) and R1 (right).
 - The d-pad is pressed by the left analog stick (the right stick was the first version; the owner asked for the left one).
 - Overscan shows the lines the game declares, clipped to the video lines 16 to 248 and stretched over the frame: no black bands (the Megaman X5 menu ends at line 248), its top is kept and nothing adjusts while a game runs. The formula keeps every register the display handler reads afterwards as the stock code leaves it. The content-aware crop and its real-time adjustment are removed.

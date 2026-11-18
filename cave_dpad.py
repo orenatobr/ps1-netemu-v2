@@ -22,12 +22,35 @@ HOOK_VA, HOOK_STOCK = 0xEC16C, 0xB0030000  # sth r0,0(r3)
 RESUME = 0xEC170
 PADS_TOC, ANALOG_FLAG, PAD_STRIDE = -0x7CCC, 0x9C, 0xD8
 LOW, HIGH = 0x40, 0xC0
+# Overscan top adjust: SELECT + UP / DOWN moves the first video line shown by 2 (0 to MAX_DELTA), see cave_overscan.py
+DELTA, PREV_UP, PREV_DOWN, MAX_DELTA = -0x18A0, -0x189C, -0x1898, 24  # offsets from 0x1c0000: 0x1BE760 / 64 / 68
+SELECT, UP_BTN, DOWN_BTN = 0x0100, 0x1000, 0x4000  # active low: the bit set means not pressed
 LEFT, RIGHT, UP, DOWN = 0x7FFF, 0xDFFF, 0xEFFF, 0xBFFF  # the button bit cleared = pressed (active low)
 L1, R1 = 0xFFFB, 0xFFF7  # bits 2 and 3 of the second byte
 
 
+def _adjust(tag: str, mask: int, prev: int, up: bool) -> list[tuple]:
+    """One SELECT + direction edge: a press (not a hold) moves DELTA by 2, inside 0..MAX_DELTA."""
+    keep = ("bge" if up else "ble", f"{tag}2")
+    step = ("cmpwi", "r10", MAX_DELTA if up else 0), keep, ("addi", "r10", "r10", 2 if up else -2)
+    return [
+        ("li", "r11", 0), ("andi.", "r10", "r0", SELECT), ("cmpwi", "r10", 0), ("bne", f"{tag}1"),
+        ("andi.", "r10", "r0", mask), ("cmpwi", "r10", 0), ("bne", f"{tag}1"), ("li", "r11", 1),
+        ("label", f"{tag}1"),
+        ("lwz", "r10", prev, "r9"), ("stw", "r11", prev, "r9"),
+        ("cmpwi", "r10", 0), ("bne", f"{tag}2"), ("cmpwi", "r11", 0), ("beq", f"{tag}2"),
+        ("lwz", "r10", DELTA, "r9"), *step, ("stw", "r10", DELTA, "r9"),
+        ("label", f"{tag}2"),
+    ]
+
+
 def program() -> list[tuple]:
     return [
+        ("cmpwi", "r30", 0), ("bne", "noadj"),  # pad 1 only
+        ("std", "r11", -0x10, "r1"), ("lis", "r9", 0x1C),
+        *_adjust("u", UP_BTN, PREV_UP, True), *_adjust("d", DOWN_BTN, PREV_DOWN, False),
+        ("ld", "r11", -0x10, "r1"),
+        ("label", "noadj"),
         ("lwz", "r10", PADS_TOC, "r2"), ("cmpwi", "r30", 0), ("beq", "p0"), ("addi", "r10", "r10", PAD_STRIDE),
         ("label", "p0"),
         ("lwz", "r9", ANALOG_FLAG, "r10"), ("cmpwi", "r9", 0), ("bne", "done"),

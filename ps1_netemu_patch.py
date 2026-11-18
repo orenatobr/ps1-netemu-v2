@@ -52,7 +52,7 @@ class Patch:
 # Every change lives in ps3mapi_patch (single source of truth).
 ANALOG_VA = CAVE_VA + 0xE00
 DPAD_VA = CAVE_VA + 0xA00
-OVERSCAN_VA = CAVE_VA + 0xB00
+OVERSCAN_VA = CAVE_VA + 0xC00
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
 _DPAD, _DPAD_BYTES = _dpad_cave(DPAD_VA)

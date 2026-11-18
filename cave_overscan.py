@@ -13,7 +13,8 @@ branch to the shared tail at 0x115820; it now jumps here instead. This code
   * rejoins the tail at 0x1158ac, where the stock code subtracts 1 from f13 to get the bottom.
 
 The result depends only on what the game declares, so nothing adjusts while it runs. Float constants live in
-free TOC slots (16.0, 2.0, 248.0). PAL keeps the stock tail.
+free TOC slots (16.0, 2.0, 248.0). The first line can be raised by the owner with SELECT + UP / DOWN (cave_dpad.py),
+in steps of 2 lines up to 24, kept in the integer slot at 0x1BE760 (0 after a restart). PAL keeps the stock tail.
 """
 from __future__ import annotations
 
@@ -45,7 +46,10 @@ def program() -> list[tuple]:
         ("label", "has"),
         ("std", "r9", 0xC0, "r1"), ("lfd", "f0", 0xC0, "r1"), ("fcfid", "f0", "f0"), ("frsp", "f0", "f0"),
         ("std", "r0", 0xC0, "r1"), ("lfd", "f10", 0xC0, "r1"), ("fcfid", "f10", "f10"), ("frsp", "f10", "f10"),
-        ("lfs", "f11", TOC_FIRST, "r2"), ("lfs", "f12", TOC_LAST, "r2"),
+        ("lis", "r10", 0x1C), ("lwz", "r10", -0x18A0, "r10"),  # the owner's top adjust (SELECT + UP / DOWN), in lines
+        ("std", "r10", 0xC0, "r1"), ("lfd", "f11", 0xC0, "r1"), ("fcfid", "f11", "f11"), ("frsp", "f11", "f11"),
+        ("lfs", "f12", TOC_FIRST, "r2"), ("fadds", "f11", "f11", "f12"),  # first = 16 + adjust
+        ("lfs", "f12", TOC_LAST, "r2"),
         ("fsubs", "f13", "f0", "f11"), ("fsel", "f13", "f13", "f0", "f11"),  # f13 = max(Y1, 16)
         ("fsubs", "f4", "f10", "f12"), ("fsel", "f4", "f4", "f12", "f10"),  # f4 = min(Y2, 248)
         ("fsubs", "f6", "f4", "f13"), ("fsubs", "f7", "f6", "f2"),  # span; span - 1 < 0 means an empty range

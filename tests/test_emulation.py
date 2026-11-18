@@ -871,3 +871,92 @@ def test_the_right_stick_does_nothing_in_analog_mode(cave_elf):
 def test_both_sticks_can_work_together(cave_elf):
     got, _ = _dpad(cave_elf, rx=0, ry=128, rsx=255)
     assert got == IDLE & ~0x8000 & ~0x0008
+
+
+# ---- the owner's top adjust: SELECT + UP / DOWN --------------------------------------------------------
+
+ADJ_DELTA, ADJ_PREV_UP, ADJ_PREV_DOWN = 0x1BE760, 0x1BE764, 0x1BE768
+SEL, BTN_UP, BTN_DOWN = 0x0100, 0x1000, 0x4000
+
+
+def _press(cpu_state, buttons, pad=0):
+    """Run the pad hook once with `buttons` (active low) on the memory image in `cpu_state`; return the Cpu."""
+    cpu = cpu_state
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.r[29], cpu.r[30], cpu.r[0] = STACK, TOC, REC, SRC, pad * 0x94, 0xFFFF0000 | buttons
+    cpu.wr(TOC - 0x7CCC, 4, PADS)
+    cpu.wr(SRC + 0xC, 2, 128)
+    cpu.wr(SRC + 0x10, 2, 128)
+    cpu.wr(SRC + 0x12, 2, 128)
+    cpu.run(D.HOOK_VA, {D.RESUME})
+    return cpu
+
+
+def _delta(cpu):
+    return cpu.rd(ADJ_DELTA, 4)
+
+
+def test_select_up_moves_the_first_line_by_two_per_press(cave_elf):
+    cpu = Cpu(cave_elf)
+    for n in (1, 2, 3):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)  # pressed
+        _press(cpu, IDLE)  # released
+        assert _delta(cpu) == 2 * n
+
+
+def test_holding_select_up_counts_one_press_only(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(5):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)
+    assert _delta(cpu) == 2
+
+
+def test_select_down_goes_back_and_stops_at_zero(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(2):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)
+        _press(cpu, IDLE)
+    for _ in range(4):
+        _press(cpu, IDLE & ~SEL & ~BTN_DOWN)
+        _press(cpu, IDLE)
+    assert _delta(cpu) == 0
+
+
+def test_the_adjust_stops_at_the_limit(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(20):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)
+        _press(cpu, IDLE)
+    assert _delta(cpu) == D.MAX_DELTA
+
+
+@pytest.mark.parametrize("buttons", [IDLE & ~BTN_UP, IDLE & ~BTN_DOWN, IDLE & ~SEL])
+def test_up_down_or_select_alone_change_nothing(cave_elf, buttons):
+    cpu = Cpu(cave_elf)
+    _press(cpu, buttons)
+    _press(cpu, IDLE)
+    assert _delta(cpu) == 0
+
+
+def test_the_adjust_ignores_the_other_pads_and_keeps_the_buttons(cave_elf):
+    cpu = Cpu(cave_elf)
+    _press(cpu, IDLE & ~SEL & ~BTN_UP, pad=1)
+    assert _delta(cpu) == 0
+    cpu.r[11] = 0x1234
+    _press(cpu, IDLE & ~SEL & ~BTN_UP)
+    assert cpu.rd(REC, 2) == IDLE & ~SEL & ~BTN_UP  # the game still sees what was pressed
+    assert cpu.r[11] == 0x1234  # r11 is restored
+
+
+@pytest.mark.parametrize("delta", [0, 2, 8, 24])
+def test_the_quad_starts_the_adjusted_number_of_lines_lower(elfs, delta):
+    _, patched = elfs
+    cpu = Cpu(patched)
+    cpu.wr(ADJ_DELTA, 4, delta)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+    cpu.wr(FRAME + 0x1C, 4, 16)
+    cpu.wr(FRAME + 0x20, 4, 256)
+    cpu.wr(FRAME + 0xC, 4, 240)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+    cpu.run(0x115AC0, {0x1158B0})
+    k = 2 / (248 - (16 + delta))
+    assert (cpu.f[7], cpu.f[4]) == pytest.approx((k * (16 - (16 + delta)) - 1, k * (256 - (16 + delta)) - 1), abs=1e-4)
