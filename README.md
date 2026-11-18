@@ -15,7 +15,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 6 | **Slot 2 to slot 1 fallback** | A PS1 card in slot 2 moves to slot 1 when slot 1 has none (PS2 cards never count). |
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
 | 8 | **Sticks as buttons** | In digital mode the left analog stick presses the d-pad and the right stick presses L1 (left) and R1 (right). |
-| 9 | **Full Screen fills the 16:9 window** | "Screen Mode: Full Screen" stretches the picture over the 16:9 frame with the same margin Normal leaves in its 4:3 window. |
+| 9 | **Full Screen goes edge to edge** | "Screen Mode: Full Screen" stretches the picture over 100% of the 16:9 width. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
 1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
@@ -203,22 +203,22 @@ To add a game, hold SELECT and press UP until its bar is gone, count the presses
 in `cave_overscan.py` (the serial is the name of its card in `/dev_hdd0/savedata/vmc`).
 
 
-### 9. Full Screen fills the 16:9 window
+### 9. Full Screen goes edge to edge
 
 The emulator draws the picture quad with its horizontal ends kept in the render state (`r20 + 0x1ac` left, `+0x1b0` right,
 nominal +-640/720 of half the frame). Which path draws it depends on the up-convert mode the menu sets (`0x1620474`, read
 at `0x114ddc`):
 
-  * **Normal** (0) multiplies the ends by `(height / width) * 1.4668`: the 4:3 window of a 16:9 frame (75% of the width)
-    times 1.1001 of overscan, so the picture fills 97.8% of its window.
+  * **Normal** (0) multiplies the ends by `(height / width) * 1.4668`: a 4:3 window inside the 16:9 frame.
   * **Full Screen** (any other value) used the nominal ends as they were, so the picture filled 88.9% of the frame width
     and left 5.5% of black on each side.
 
-`cave_fullscreen.py` hooks the start of the second path (`0x115b60`) and multiplies both ends by 1.1001 (`0.75 * 1.4668`,
-the overscan Normal applies), so Full Screen fills 97.8% of its window too, with 1.1% of margin on each side (measured on
-the console in the frame buffer: 88.9% before, 97.8% after). The factor is a ratio of the frame, so it does not depend on the
-output resolution (720p or 1080p). It acts only when the output is wider than 720, the same test the emulator makes for
-Normal; SD outputs keep the stock picture. Normal never reaches the hook and the vertical ends are not touched.
+`cave_fullscreen.py` hooks the start of the second path (`0x115b60`) and multiplies both ends by 720/640, which takes
+them to +-1: the picture fills 100% of the width (measured on the console in the frame buffer: 88.9% before the patch).
+An intermediate build (v2.19) used the 1.1001 overscan of the Normal path and left 1.1% on each side, still a visible
+stripe on the TV. The factor is a ratio of the frame, so it does not depend on the output resolution (720p or 1080p). It
+acts only when the output is wider than 720, the same test the emulator makes for Normal; SD outputs keep the stock
+picture. Normal never reaches the hook and the vertical ends are not touched.
 
 ### 10. Screen mode and Smoothing of the emulator menu: not controllable here
 

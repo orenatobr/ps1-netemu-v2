@@ -835,7 +835,6 @@ import cave_fullscreen as FS
 RENDER = 0x45000000  # the render state r20 points to
 WIDTH_VAR = 0x1620488  # the output width, a variable of the emulator (TOC -0x7844 holds its address)
 NOMINAL = 640 / 720  # the stock quad ends, as a fraction of half the frame
-OVERSCAN = 0.75 * 1.4668133  # what the Normal path adds around its 4:3 window
 
 
 def _full_screen(elf, width=1280, left=-NOMINAL, right=NOMINAL):
@@ -855,19 +854,16 @@ def _ends(cpu):
 
 
 @pytest.mark.parametrize("width", [1280, 1920])  # 720p and 1080p: the same fraction of the frame
-def test_full_screen_ends_get_the_overscan_factor_the_normal_window_has(cave_elf, width):
+def test_full_screen_ends_are_the_edges_of_the_frame(cave_elf, width):
+    """The nominal ends (88.9% of the frame) grow to 100%: +-1 of half the frame, no black stripe left."""
     left, right = _ends(_full_screen(cave_elf, width))
-    assert (left, right) == pytest.approx((-NOMINAL * OVERSCAN, NOMINAL * OVERSCAN), rel=1e-4)
+    assert (left, right) == pytest.approx((-1.0, 1.0), abs=1e-6)
 
 
-@pytest.mark.parametrize("width", [1280, 1920])
-def test_full_screen_fills_the_same_share_of_its_window_as_normal_does_of_its_own(cave_elf, width):
-    """Normal: the 4:3 window is 0.75 of the frame and the picture fills 0.5625 * 1.4668 * (640/720) / 0.75 of it."""
-    normal_share_of_window = 0.5625 * 1.4668133 * NOMINAL / 0.75
-    left, right = _ends(_full_screen(cave_elf, width))
-    full_share_of_window = (right - left) / 2  # the window is the whole frame, ends are fractions of half of it
-    assert full_share_of_window == pytest.approx(normal_share_of_window, rel=1e-4)
-    assert 0.95 < full_share_of_window < 1.0  # inside the frame
+@pytest.mark.parametrize("left,right", [(-NOMINAL, NOMINAL), (-0.8, 0.8), (-0.5, 0.9)])
+def test_full_screen_grows_any_ends_by_the_same_ratio_of_the_frame(cave_elf, left, right):
+    got = _ends(_full_screen(cave_elf, 1280, left, right))
+    assert got == pytest.approx([left * 1.125, right * 1.125], rel=1e-6)
 
 
 @pytest.mark.parametrize("width", [720, 640, 480])  # SD output: the Normal path adds nothing there either
