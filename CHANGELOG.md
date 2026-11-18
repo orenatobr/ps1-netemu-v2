@@ -2,6 +2,9 @@
 
 The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release tag counts the published builds.
 
+## v2.15
+- Every game is drawn with the same width in the 4:3 window. The stock quad took its left and right ends from the horizontal range the game declares, so Final Fantasy VII came out narrower than Megaman X5 (measured on the TV). Both ends are now the nominal ones (+-640/720 of the window) whatever the game declares or the width mode (the stock 384 mode used 672/720): three instructions at `0x1158ec`, `0x1158f4` and `0x115b48`, no code cave.
+
 ## v2.14
 - The emulator's vibration switch (`X + 0x84`) is kept on: the actuator clears it on every update and the pad thread no longer sets it.
 - The menu options Screen mode and Smoothing cannot be forced from the emulator code (none of its 61 settings changed when Smoothing was switched on), so they stay with the system menu: keep Normal and Disabled.
