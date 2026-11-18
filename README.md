@@ -15,6 +15,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 6 | **Slot 2 to slot 1 fallback** | A PS1 card in slot 2 moves to slot 1 when slot 1 has none (PS2 cards never count). |
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
 | 8 | **Sticks as buttons** | In digital mode the left analog stick presses the d-pad and the right stick presses L1 (left) and R1 (right). |
+| 9 | **Full Screen fills the 16:9 window** | "Screen Mode: Full Screen" stretches the picture over the 16:9 frame with the same margin Normal leaves in its 4:3 window. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
 1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
@@ -154,7 +155,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 |---|---|
 | `ps1_netemu_patch.py` | Unpacks the SELF, applies every patch, grows the text segment (`extend_text`), repacks, recomputes the hashes |
 | `ps3mapi_patch.py` | The in-place word patches (`CODE`, `CONSTANTS`) and the live patcher |
-| `cave_dpad.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
+| `cave_dpad.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py`, `cave_fullscreen.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
 | `ppcasm.py` | Tiny PowerPC assembler with labels, only what the caves use |
 | `tests/` | `test_patch.py` (container), `test_emulation.py` (runs the real emulator code in a PowerPC interpreter) |
 | `installer/` | The PS3 app (PSL1GHT), its tests and the packaging tools |
@@ -202,10 +203,27 @@ To add a game, hold SELECT and press UP until its bar is gone, count the presses
 in `cave_overscan.py` (the serial is the name of its card in `/dev_hdd0/savedata/vmc`).
 
 
+### 9. Full Screen fills the 16:9 window
+
+The emulator draws the picture quad with its horizontal ends kept in the render state (`r20 + 0x1ac` left, `+0x1b0` right,
+nominal +-640/720 of half the frame). Which path draws it depends on the up-convert mode the menu sets (`0x1620474`, read
+at `0x114ddc`):
+
+  * **Normal** (0) multiplies the ends by `(height / width) * 1.4668`: the 4:3 window of a 16:9 frame (75% of the width)
+    times 1.1001 of overscan, so the picture fills 97.8% of its window.
+  * **Full Screen** (any other value) used the nominal ends as they were, so the picture filled 88.9% of the frame width
+    and left 5.5% of black on each side.
+
+`cave_fullscreen.py` hooks the start of the second path (`0x115b60`) and multiplies both ends by 1.1001 (`0.75 * 1.4668`,
+the overscan Normal applies), so Full Screen fills 97.8% of its window too, with 1.1% of margin on each side (measured on
+the console in the frame buffer: 88.9% before, 97.8% after). The factor is a ratio of the frame, so it does not depend on the
+output resolution (720p or 1080p). It acts only when the output is wider than 720, the same test the emulator makes for
+Normal; SD outputs keep the stock picture. Normal never reaches the hook and the vertical ends are not touched.
+
 ### 10. Screen mode and Smoothing of the emulator menu: not controllable here
 
-The menu of the emulator has two options, "Screen mode" and "Smoothing", that break the picture the overscan cave builds.
-They cannot be forced from the emulator code: with Smoothing switched on, none of the 61 settings of the emulator (0 to
+The menu of the emulator has two options, "Screen mode" and "Smoothing". Their effect on the geometry is described above,
+but the picture the overscan cave builds still breaks when they change. They cannot be forced from the emulator code: with Smoothing switched on, none of the 61 settings of the emulator (0 to
 60, read through PS3MAPI at `base + 0x14 + 4 * index`, base from TOC slot `-0x7e94`) changed, so the two options live
 outside that table, like the vibration option of feature 3 (the system menu keeps them). Keep them at Normal and Disabled.
 An earlier build forced bits 0 and 1 of setting 49, which the display handler reads; it was removed because it never
