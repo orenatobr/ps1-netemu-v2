@@ -2,6 +2,9 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `installer/tools/release_notes.sh` prints it and `installer/tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the package and the app show it, the tag is `v<version>`.
 
+## v2.20
+- "Screen Mode: Full Screen" now goes edge to edge. v2.19 left 1.1% of the width black on each side, which still showed as a stripe about a finger wide on the TV; the picture now fills 100% of the 16:9 width (the nominal ends grow by 720/640 to the frame edges). Still a ratio of the frame, so it holds at 720p and 1080p, and it still only applies to HD outputs. Normal is unchanged.
+
 ## v2.19
 - "Screen Mode: Full Screen" now stretches the picture over the whole 16:9 frame. It used to fill 88.9% of the width and leave 5.5% of black on each side; it now fills 97.8% of its window, the same share the Normal mode (the 4:3 window) fills of its own, with 1.1% of margin on each side. Measured on the console in the frame buffer, with the game open in Full Screen. The change is a ratio of the frame, so it holds at 720p and 1080p, and it only applies to HD outputs like Normal does. Normal is unchanged.
 - Code: `cave_fullscreen.py` hooks the Full Screen path of the display handler (`0x115b60`).
