@@ -5,6 +5,9 @@ The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release t
 ## v2.15
 - Every game is drawn with the same width in the 4:3 window. The stock quad took its left and right ends from the horizontal range the game declares, so Final Fantasy VII came out narrower than Megaman X5 (measured on the TV). Both ends are now the nominal ones (+-640/720 of the window) whatever the game declares or the width mode (the stock 384 mode used 672/720): three instructions at `0x1158ec`, `0x1158f4` and `0x115b48`, no code cave.
 
+## v2.17
+- The installer updates an older patched build (for example v2.14) when the original is safe in `/dev_hdd0/ps1_netemu_stock.self`. It used to show "Unknown build" and refuse, so no update could be installed over a previous patch. An unknown file without a valid backup is still refused. Same patch as v2.15.
+
 ## v2.16
 - The installer works when `/dev_blind` is already mounted by webMAN: the mount fails then, and the app wrongly reported "needs custom firmware". It now checks that the emulator file is reachable and only unmounts what it mounted itself. Same patch as v2.15.
 
