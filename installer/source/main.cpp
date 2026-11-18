@@ -31,7 +31,9 @@ int main() {
     const ui::Text& t = ps3::portuguese() ? ui::kPt : ui::kEn;
     gfx::Canvas canvas(width, height, ps3::fontBytes(false), ps3::fontBytes(true));
 
-    const bool mounted = sysLv2FsMount("CELL_FS_IOS:BUILTIN_FLSH1", "CELL_FS_FAT", "/dev_blind", 0) == 0;
+    const bool mountedByUs = sysLv2FsMount("CELL_FS_IOS:BUILTIN_FLSH1", "CELL_FS_FAT", "/dev_blind", 0) == 0;
+    // Another tool (webMAN) may already hold /dev_blind: the mount then fails, but the emulator file is reachable.
+    const bool mounted = mountedByUs || fsx::exists(kTarget);
     const installer::Config cfg{kTarget, kBackup, kStockSha, PATCHED_SHA256};
     const installer::Bytes payload(ps1_netemu_v2_bin, ps1_netemu_v2_bin + ps1_netemu_v2_bin_size);
 
@@ -55,7 +57,7 @@ int main() {
         ps3::videoPresent(canvas.pixels());
         ps3::sleepMs(33);
     }
-    if (mounted) sysLv2FsUnmount("/dev_blind");
+    if (mountedByUs) sysLv2FsUnmount("/dev_blind");
     ps3::videoShutdown();
     return 0;
 }
