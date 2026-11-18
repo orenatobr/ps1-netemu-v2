@@ -27,9 +27,7 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-NTSC_STRETCH = 240 / 224  # screen lines / window lines: DuckStation's fixed overscan window fills the frame
-OVERSCAN_START = 24  # first line of that window (it ends at line 248)
-PAL_STRETCH = 1.0  # PAL keeps the stock 1:1 window
+OVERSCAN_FIRST, OVERSCAN_LAST = 24, 248  # DuckStation's fixed window (gpu.cpp), see cave_overscan.py
 
 
 def f32(x: float) -> int:
@@ -39,22 +37,6 @@ def f32(x: float) -> int:
 # (address, stock word, patched word, what). Order matters only loosely; the sites
 # are rewritten between two frames and each frame is consistent once all are done.
 CODE = (
-    # PAL block: f6 = 2*PAL_STRETCH, f0 = Y1, f7 = 0.0
-    (0x115808, 0x79200020, 0xC0C2AA28, "PAL: f6 = 2 (no scaling)"),
-    (0x115810, 0xF80100C0, 0xF92100C0, "PAL: std r9"),
-    (0x115814, 0xC8E100C0, 0xC80100C0, "PAL: lfd f0"),
-    (0x115818, 0xFCE03E9C, 0xFC00069C, "PAL: fcfid f0"),
-    (0x11581C, 0xFC003818, 0xC0E287FC, "PAL: f7 = 0.0"),
-    # NTSC block: f13 = first line of the window (24), f6 = 2*s, f0 = Y1, f7 = 0.0
-    (0x115AC4, 0xC1A28894, 0xC1A2AA24, "NTSC: f13 = 24 (free slot)"),
-    (0x115AC8, 0x79200020, 0xC0C2AA20, "NTSC: f6 = 2*s (free slot)"),
-    (0x115AD0, 0xF80100C0, 0xF92100C0, "NTSC: std r9"),
-    (0x115AD4, 0xC86100C0, 0xC80100C0, "NTSC: lfd f0"),
-    (0x115AD8, 0xFC601E9C, 0xFC00069C, "NTSC: fcfid f0"),
-    (0x115ADC, 0xFC001818, 0xC0E287FC, "NTSC: f7 = 0.0"),
-    # shared tail: the doubling of both quad ends becomes a multiplication by f6 (2 * stretch)
-    (0x115894, 0xEC00002A, 0xEC0001B2, "fmuls f0,f0,f6: y1 = 2*s*(Y1-c)/H"),
-    (0x1158A0, 0xEDAD682A, 0xEDAD01B2, "fmuls f13,f13,f6: y2 likewise"),
     # vibration: the actuator function (0xeb198) used to send force only through a chain of conditions (the
     # internal block flag at X+0x84 and a strength curve built from settings 50 and 51). The motors now get
     # exactly what the game commands: small motor = r28 (on/off), large motor = r30 (0..255).
@@ -64,9 +46,9 @@ CODE = (
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (
-    (0x1BE750, f32(2 * NTSC_STRETCH)),
-    (0x1BE754, f32(OVERSCAN_START)),
-    (0x1BE758, f32(2 * PAL_STRETCH)),
+    (0x1BE750, f32(OVERSCAN_FIRST)),
+    (0x1BE754, f32(OVERSCAN_LAST)),
+    (0x1BE758, f32(2.0)),
 )
 
 

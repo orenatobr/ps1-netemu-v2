@@ -712,31 +712,49 @@ def _base_quad(elf, y1d, y2d, height=240):
     return cpu.f[7], cpu.f[4]
 
 
-def _win(y):
-    """Frame position of video line y in DuckStation's fixed window (lines 24..248 fill the frame).
-
-    24 and 248 are NTSC_OVERSCAN_VERTICAL_ACTIVE_START/END in DuckStation src/core/gpu.cpp.
-    """
-    return -1 + 2 * (y - 24) / 224
+def _win(y1d, y2d):
+    """Expected quad: DuckStation's window (lines 24..248, gpu.cpp NTSC_OVERSCAN_VERTICAL_ACTIVE_*) clipped to the
+    declared lines, stretched over the frame."""
+    first, last = max(y1d, 24), min(y2d or y1d + 240, 248)
+    if last <= first:
+        first, last = 24, 248
+    k = 2 / (last - first)
+    return k * (y1d - first) - 1, k * ((y2d or y1d + 240) - first) - 1
 
 
 @pytest.mark.parametrize("y1d,y2d", [
     (16, 256),  # all 240 lines: the window crops 8 above and 8 below
+    (16, 0),  # no end line declared: 240 lines
     (24, 248),  # exactly the window
-    (26, 242),  # Xenogears: 216 lines
+    (26, 242),  # Xenogears: 216 lines fill the frame, no black bands
     (28, 242),
+    (30, 300),  # more below than the window: cropped at 248
+    (40, 40),  # an empty range falls back to the whole window
 ])
-def test_the_base_formula_puts_every_line_where_duckstation_would(elfs, y1d, y2d):
-    """DuckStation Overscan: fixed lines 24..248 over the whole frame, whatever the game declares."""
+def test_the_base_formula_shows_the_declared_lines_inside_duckstations_window(elfs, y1d, y2d):
     _, patched = elfs
     y1, y2 = _base_quad(patched, y1d, y2d)
-    assert (y1, y2) == pytest.approx((_win(y1d), _win(y2d)), abs=1e-5)
+    assert (y1, y2) == pytest.approx(_win(y1d, y2d), abs=1e-4)
 
 
-def test_the_base_formula_still_crops_lines_above_the_visible_start(elfs):
+def test_the_cave_leaves_the_width_and_the_compare_as_the_stock_tail_does(elfs):
+    stock, patched = elfs
+    out = []
+    for elf in (stock, patched):
+        cpu = Cpu(elf)
+        cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+        cpu.wr(FRAME + 0x1C, 4, 26)
+        cpu.wr(FRAME + 0x20, 4, 242)
+        cpu.wr(FRAME + 0xC, 4, 240)
+        cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+        cpu.run(0x115AC0, {0x1158B0})
+        out.append(cpu.f[3])
+    assert out[0] == pytest.approx(out[1])
+
+
+def test_a_game_declaring_less_than_the_window_fills_the_frame(elfs):
     _, patched = elfs
-    y1, y2 = _base_quad(patched, 8, 248)
-    assert y1 < -1.0 and y2 == pytest.approx(1.0, abs=1e-5)  # lines above 24 fall off the frame, line 248 is its end
+    assert _base_quad(patched, 26, 242) == pytest.approx((-1.0, 1.0), abs=1e-5)
 
 
 def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):
