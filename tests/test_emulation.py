@@ -700,43 +700,67 @@ def test_the_name_given_to_slot_1_has_the_extension_like_the_one_in_slot_2(cave_
 FRAME = 0x32000000
 
 
-def _base_quad(elf, y1d, y2d, height=240):
-    """Run the patched formula from the NTSC entry (0x115ac0) to its first branch after y1/y2 and return them."""
+def _run_quad(elf, y1d, y2d, height=240, r30=0, r4=1):
+    """Run the formula from the NTSC entry (0x115ac0) to its first branch after y1/y2 and return the Cpu."""
     cpu = Cpu(elf)
-    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, r4, 320, r30
     cpu.wr(FRAME + 0x1C, 4, y1d)
     cpu.wr(FRAME + 0x20, 4, y2d)
     cpu.wr(FRAME + 0xC, 4, height)
     cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
     cpu.run(0x115AC0, {0x1158B0})
+    return cpu
+
+
+def _base_quad(elf, y1d, y2d, height=240):
+    cpu = _run_quad(elf, y1d, y2d, height)
     return cpu.f[7], cpu.f[4]
 
 
-def _win(y):
-    """Frame position of video line y in DuckStation's fixed window (lines 24..248 fill the frame).
-
-    24 and 248 are NTSC_OVERSCAN_VERTICAL_ACTIVE_START/END in DuckStation src/core/gpu.cpp.
-    """
-    return -1 + 2 * (y - 24) / 224
+def _win(y1d, y2d):
+    """Expected quad: DuckStation's window (lines 24..248, gpu.cpp NTSC_OVERSCAN_VERTICAL_ACTIVE_*) clipped to the
+    declared lines and stretched over the frame."""
+    end = y2d or y1d + 240
+    first, last = max(y1d, 24), min(end, 248)
+    if last <= first:
+        first, last = 24, 248
+    k = 2 / (last - first)
+    return k * (y1d - first) - 1, k * (end - first) - 1
 
 
 @pytest.mark.parametrize("y1d,y2d", [
     (16, 256),  # all 240 lines: the window crops 8 above and 8 below
+    (16, 0),  # no end line declared: 240 lines
     (24, 248),  # exactly the window
-    (26, 242),  # Xenogears: 216 lines
+    (26, 242),  # Xenogears: 216 lines fill the frame, no black bands
     (28, 242),
+    (30, 300),  # more below than the window: cropped at 248
+    (40, 40),  # an empty range falls back to the whole window
 ])
-def test_the_base_formula_puts_every_line_where_duckstation_would(elfs, y1d, y2d):
-    """DuckStation Overscan: fixed lines 24..248 over the whole frame, whatever the game declares."""
+def test_the_quad_shows_the_declared_lines_inside_duckstations_window(elfs, y1d, y2d):
     _, patched = elfs
-    y1, y2 = _base_quad(patched, y1d, y2d)
-    assert (y1, y2) == pytest.approx((_win(y1d), _win(y2d)), abs=1e-5)
+    assert _base_quad(patched, y1d, y2d) == pytest.approx(_win(y1d, y2d), abs=1e-4)
 
 
-def test_the_base_formula_still_crops_lines_above_the_visible_start(elfs):
+def test_a_game_declaring_less_than_the_window_fills_the_frame(elfs):
     _, patched = elfs
-    y1, y2 = _base_quad(patched, 8, 248)
-    assert y1 < -1.0 and y2 == pytest.approx(1.0, abs=1e-5)  # lines above 24 fall off the frame, line 248 is its end
+    assert _base_quad(patched, 26, 242) == pytest.approx((-1.0, 1.0), abs=1e-5)
+
+
+@pytest.mark.parametrize("y1d,y2d,height,r30,r4", [
+    (26, 242, 240, 0, 1), (16, 256, 240, 0, 1), (16, 0, 240, 0, 1), (26, 242, 480, 0, 1),
+    (26, 242, 240, 1, 1), (30, 300, 240, 0, 1), (26, 242, 240, 0, 2), (40, 40, 240, 0, 1),
+])
+def test_the_rest_of_the_handler_sees_the_state_the_stock_formula_leaves(elfs, y1d, y2d, height, r30, r4):
+    """The texture span (f1), the width (f3), the compare (cr7) and the registers read later stay as stock.
+
+    The first version of the clipped window overwrote f1 and drew half a picture with glitches on the console.
+    """
+    stock, patched = elfs
+    a, b = _run_quad(stock, y1d, y2d, height, r30, r4), _run_quad(patched, y1d, y2d, height, r30, r4)
+    assert (b.f[1], b.f[3], b.f[2], b.f[8], b.f[9]) == (a.f[1], a.f[3], a.f[2], a.f[8], a.f[9])
+    assert b.cr[7] == a.cr[7]
+    assert (b.r[0], b.r[9], b.r[4], b.r[5], b.r[22], b.r[30]) == (a.r[0], a.r[9], a.r[4], a.r[5], a.r[22], a.r[30])
 
 
 def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):

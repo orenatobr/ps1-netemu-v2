@@ -30,7 +30,7 @@ def _b(disp: int, link: int) -> int:
     return (18 << 26) | (disp & 0x03FFFFFC) | link
 
 
-CONDS = {"beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28), "bgt": (12, 29), "ble": (4, 29)}  # cr7
+CONDS = {"beq6": (12, 26), "beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28), "bgt": (12, 29), "ble": (4, 29)}  # cr7
 
 
 def assemble(base: int, lines: list[tuple]) -> list[int]:
@@ -66,6 +66,8 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
             w = (31 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 16) | (_r(a[2]) << 11) | (266 << 1)
         elif m == "cmpwi":
             w = (11 << 26) | (7 << 23) | (_r(a[0]) << 16) | _i16(a[1])
+        elif m == "cmpwi6":  # the same compare into cr6
+            w = (11 << 26) | (6 << 23) | (_r(a[0]) << 16) | _i16(a[1])
         elif m == "cmplwi":
             w = (10 << 26) | (7 << 23) | (_r(a[0]) << 16) | _i16(a[1])
         elif m == "cmpw":
@@ -120,6 +122,8 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
             w = (63 << 26) | (7 << 23) | (_r(a[0]) << 16) | (_r(a[1]) << 11)
         elif m == "fcfid":
             w = (63 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 11) | (846 << 1)
+        elif m == "fmr":
+            w = (63 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 11) | (72 << 1)
         elif m == "frsp":
             w = (63 << 26) | (_r(a[0]) << 21) | (_r(a[1]) << 11) | (12 << 1)
         elif m == "mflr":

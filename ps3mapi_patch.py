@@ -67,6 +67,7 @@ CONSTANTS = (
     (0x1BE750, f32(2 * NTSC_STRETCH)),
     (0x1BE754, f32(OVERSCAN_START)),
     (0x1BE758, f32(2 * PAL_STRETCH)),
+    (0x1BE75C, f32(248.0)),  # the end of the window, for cave_overscan.py
 )
 
 
