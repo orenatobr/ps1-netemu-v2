@@ -828,6 +828,74 @@ def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):
     assert cpu.rd(0x114148, 4) == 0xD0D401AC  # stfs f6,0x1ac(r20), as in the stock image
 
 
+# ---- Screen Mode: Full Screen fills the 16:9 window ----------------------------------------------
+
+import cave_fullscreen as FS
+
+RENDER = 0x45000000  # the render state r20 points to
+WIDTH_VAR = 0x1620488  # the output width, a variable of the emulator (TOC -0x7844 holds its address)
+NOMINAL = 640 / 720  # the stock quad ends, as a fraction of half the frame
+OVERSCAN = 0.75 * 1.4668133  # what the Normal path adds around its 4:3 window
+
+
+def _full_screen(elf, width=1280, left=-NOMINAL, right=NOMINAL):
+    """Run the Full Screen path from its first instruction to the stock instruction after the hook."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[28] = STACK, TOC, RENDER, 0x28282828
+    cpu.wr(RENDER + 0x150, 4, 7)
+    cpu.wr(WIDTH_VAR, 4, width)
+    for off, v in ((0x1AC, left), (0x1B0, right), (0x1B4, 0.25), (0x1B8, -0.5)):
+        cpu.wr(RENDER + off, 4, struct.unpack(">I", struct.pack(">f", v))[0])
+    cpu.run(FS.HOOK_VA, {FS.RESUME})
+    return cpu
+
+
+def _ends(cpu):
+    return [struct.unpack(">f", struct.pack(">I", cpu.rd(RENDER + off, 4)))[0] for off in (0x1AC, 0x1B0)]
+
+
+@pytest.mark.parametrize("width", [1280, 1920])  # 720p and 1080p: the same fraction of the frame
+def test_full_screen_ends_get_the_overscan_factor_the_normal_window_has(cave_elf, width):
+    left, right = _ends(_full_screen(cave_elf, width))
+    assert (left, right) == pytest.approx((-NOMINAL * OVERSCAN, NOMINAL * OVERSCAN), rel=1e-4)
+
+
+@pytest.mark.parametrize("width", [1280, 1920])
+def test_full_screen_fills_the_same_share_of_its_window_as_normal_does_of_its_own(cave_elf, width):
+    """Normal: the 4:3 window is 0.75 of the frame and the picture fills 0.5625 * 1.4668 * (640/720) / 0.75 of it."""
+    normal_share_of_window = 0.5625 * 1.4668133 * NOMINAL / 0.75
+    left, right = _ends(_full_screen(cave_elf, width))
+    full_share_of_window = (right - left) / 2  # the window is the whole frame, ends are fractions of half of it
+    assert full_share_of_window == pytest.approx(normal_share_of_window, rel=1e-4)
+    assert 0.95 < full_share_of_window < 1.0  # inside the frame
+
+
+@pytest.mark.parametrize("width", [720, 640, 480])  # SD output: the Normal path adds nothing there either
+def test_full_screen_keeps_the_stock_ends_on_sd_outputs(cave_elf, width):
+    assert _ends(_full_screen(cave_elf, width)) == pytest.approx([-NOMINAL, NOMINAL], rel=1e-6)
+
+
+def test_full_screen_only_scales_the_horizontal_ends(cave_elf):
+    cpu = _full_screen(cave_elf)
+    top, bottom = [struct.unpack(">f", struct.pack(">I", cpu.rd(RENDER + off, 4)))[0] for off in (0x1B4, 0x1B8)]
+    assert (top, bottom) == (0.25, -0.5)
+
+
+@pytest.mark.parametrize("width", [1280, 720])
+def test_full_screen_leaves_the_registers_the_stock_path_reads_alone(cave_elf, width):
+    cpu = _full_screen(cave_elf, width)
+    assert cpu.r[28] == 7  # the instruction the hook replaced still runs
+    assert (cpu.r[20], cpu.r[1], cpu.r[2]) == (RENDER, STACK, TOC)  # r27 is rewritten by the next stock instruction
+
+
+def test_full_screen_hook_replaces_only_the_first_word_of_the_path(elfs, cave_elf):
+    stock, _ = elfs
+    assert Cpu(stock).rd(FS.HOOK_VA, 4) == FS.STOCK_FIRST == 0x83940150  # lwz r28,336(r20)
+    assert Cpu(cave_elf).rd(FS.HOOK_VA, 4) >> 26 == 18  # a plain b to the cave
+    assert Cpu(cave_elf).rd(0x114DE8, 4) == 0x409E0D78  # bne cr7,0x115b60: the only way in, Normal never takes it
+    assert Cpu(stock).rd(TOC + FS.WIDTH_SLOT, 4) == WIDTH_VAR  # the slot the cave reads is the width variable
+
+
 # ---- the left stick as the d-pad in digital mode ----------------------------------------------
 
 import cave_dpad as D

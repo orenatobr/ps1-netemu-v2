@@ -2,6 +2,10 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `installer/tools/release_notes.sh` prints it and `installer/tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the package and the app show it, the tag is `v<version>`.
 
+## v2.19
+- "Screen Mode: Full Screen" now stretches the picture over the whole 16:9 frame. It used to fill 88.9% of the width and leave 5.5% of black on each side; it now fills 97.8% of its window, the same share the Normal mode (the 4:3 window) fills of its own, with 1.1% of margin on each side. Measured on the console in the frame buffer, with the game open in Full Screen. The change is a ratio of the frame, so it holds at 720p and 1080p, and it only applies to HD outputs like Normal does. Normal is unchanged.
+- Code: `cave_fullscreen.py` hooks the Full Screen path of the display handler (`0x115b60`).
+
 ## v2.18
 - The app is in English only (the Portuguese texts are gone).
 - The app, the package and the file names carry the real release version instead of "2.00": the app title and "Patched (v...)" line, the package version in the XMB, `ps1_netemu_v<version>.pkg` and `.self`. It comes from the new `VERSION` file at build time.
