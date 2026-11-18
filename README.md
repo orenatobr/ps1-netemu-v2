@@ -104,6 +104,8 @@ screen when the patch is installed without a backup.
 
 ### 8. Left stick as d-pad
 
+The left stick, not the right one, on purpose: the first version read the right stick and the owner asked for the left one.
+
 The pad thread stores the button halfword (active low) at `0xec16c`, with the PS3 left stick (a halfword per axis,
 128 at rest) in the copy it reads from. The hook jumps to `cave_dpad.py`, which, only while the pad is in digital
 mode (the analog flag the protocol handler tests, `+0x9c` of the pad record), clears the UP / RIGHT / DOWN / LEFT bit

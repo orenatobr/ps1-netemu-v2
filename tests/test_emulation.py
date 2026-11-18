@@ -713,7 +713,10 @@ def _base_quad(elf, y1d, y2d, height=240):
 
 
 def _win(y):
-    """Frame position of video line y in DuckStation's fixed window (lines 24..248 fill the frame)."""
+    """Frame position of video line y in DuckStation's fixed window (lines 24..248 fill the frame).
+
+    24 and 248 are NTSC_OVERSCAN_VERTICAL_ACTIVE_START/END in DuckStation src/core/gpu.cpp.
+    """
     return -1 + 2 * (y - 24) / 224
 
 
