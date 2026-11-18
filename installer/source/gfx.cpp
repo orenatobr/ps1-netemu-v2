@@ -180,8 +180,11 @@ void Canvas::checkBadge(int cx, int cy, int radius, Color disc, Color mark) {
 
 // ------------------------------------------------------------------ text --
 
+// Sizes cast from a pixel count (the package icon draws at 4x) use the bold face from here up: only its headline does.
+constexpr int kBoldFrom = 128;
+
 int Canvas::fontIndex(Size size) const {
-    const bool bold = size == Size::Large || size == Size::Title;
+    const bool bold = size == Size::Large || size == Size::Title || static_cast<int>(size) >= kBoldFrom;
     return bold && fonts_[1].ok ? 1 : 0;
 }
 

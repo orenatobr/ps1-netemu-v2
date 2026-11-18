@@ -186,6 +186,9 @@ class Cpu:
                 elif xo == 0:  # cmpw
                     a, b = _s32(self.r[ra]), _s32(self.r[rb])
                     self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
+                elif xo == 32:  # cmplw
+                    a, b = self.r[ra] & M32, self.r[rb] & M32
+                    self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
                 elif xo == 339:  # mflr
                     self.r[rt] = self.lr
                 elif xo == 467:  # mtlr
@@ -826,6 +829,32 @@ def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):
     _, patched = elfs
     cpu = Cpu(patched)
     assert cpu.rd(0x114148, 4) == 0xD0D401AC  # stfs f6,0x1ac(r20), as in the stock image
+
+
+# ---- no dithering: the RSX switch ------------------------------------------------------------
+
+RET_ADDR, GCM_CTX, GCM_CMDS = 0x1000000, 0x46000000, 0x47000000
+
+
+def _set_dither(elf, enable):
+    """Run SetDitherEnable(ctx, enable) (0x28244) with room in the command buffer; return the two words it writes."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.r[4], cpu.lr = STACK, TOC, GCM_CTX, enable, RET_ADDR
+    cpu.wr(GCM_CTX + 4, 4, GCM_CMDS + 0x100)  # end of the buffer
+    cpu.wr(GCM_CTX + 8, 4, GCM_CMDS)  # current position
+    cpu.run(0x28244, {RET_ADDR})
+    return cpu.rd(GCM_CMDS, 4), cpu.rd(GCM_CMDS + 4, 4)
+
+
+@pytest.mark.parametrize("enable", [0, 1])
+def test_the_stock_switch_sends_what_it_is_given(elfs, enable):
+    stock, _ = elfs
+    assert _set_dither(stock, enable) == (0x00040304, enable)  # method 0x0304, one argument
+
+
+@pytest.mark.parametrize("enable", [0, 1])
+def test_the_rsx_dither_switch_always_sends_zero(cave_elf, enable):
+    assert _set_dither(cave_elf, enable) == (0x00040304, 0)
 
 
 # ---- Screen Mode: Full Screen fills the 16:9 window ----------------------------------------------

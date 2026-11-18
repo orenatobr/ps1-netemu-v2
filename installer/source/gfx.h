@@ -33,7 +33,7 @@ constexpr Color amber{245, 158, 11};     // #F59E0B changed rows, warnings
 constexpr Color red{239, 68, 68};        // #EF4444 errors
 }  // namespace theme
 
-/// Text sizes in pixels at 1280x720. Large and Title use the bold face.
+/// Text sizes in pixels at 1280x720. Large and Title use the bold face, and so does any pixel count of 128 or more cast to Size (the package icon).
 enum class Size { Small = 22, Body = 26, Large = 34, Title = 52 };
 
 enum class Align { Left, Center, Right };

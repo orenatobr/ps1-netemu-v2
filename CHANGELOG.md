@@ -2,6 +2,10 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `installer/tools/release_notes.sh` prints it and `installer/tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the package and the app show it, the tag is `v<version>`.
 
+## v2.21
+- The package icon (the thumbnail in the XMB) showed "v2.00" because it was a fixed PNG. It is now drawn at build time from the `VERSION` file with the same canvas as the app (`installer/tools/icon.sh`), so it always carries the release version.
+- Dithering is removed. The emulator draws the PS1 picture with a software GPU on the SPUs, and it did dither: the draw routines pick one of two tables of 16 vectors by a flag, the 4x4 PS1 matrix of channel offsets (`XBGR_DITHER`) or zeros (`XBGR_NO_DITHER`). The 14 stores that fill the first one with non-zero offsets now store the zero vector, so both tables are the same zeros and no primitive is dithered, whatever the game asks for. The RSX dither switch (`SetDitherEnable`) is also forced to 0. On a modern TV the dither pattern shows as noise on gradients. The SPU part is covered by running the real table initialiser in a small SPU interpreter in the tests; it could not be measured live, because the SPU program is loaded when the emulator starts.
+
 ## v2.20
 - "Screen Mode: Full Screen" now goes edge to edge. v2.19 left 1.1% of the width black on each side, which still showed as a stripe about a finger wide on the TV; the picture now fills 100% of the 16:9 width (the nominal ends grow by 720/640 to the frame edges). Still a ratio of the frame, so it holds at 720p and 1080p, and it still only applies to HD outputs. Normal is unchanged.
 
