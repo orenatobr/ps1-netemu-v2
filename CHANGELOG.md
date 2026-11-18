@@ -5,7 +5,7 @@ The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release t
 ## v2.14
 - In digital mode the right stick X axis presses L1 (left) and R1 (right).
 - The d-pad is pressed by the left analog stick (the right stick was the first version; the owner asked for the left one).
-- Overscan is the DuckStation window: fixed video lines 24 to 248 stretched over the frame (`y = 2*s*(Y-24)/H - 1`, `s = 240/224`), no anchoring. The content-aware crop and its real-time adjustment are removed, so nothing adjusts while a game runs.
+- Overscan shows the lines the game declares, clipped to the active video lines 16 to 256 and stretched over the frame: no black bands, Megaman X5 loses no line and nothing adjusts while a game runs. The formula keeps every register the display handler reads afterwards as the stock code leaves it. The content-aware crop and its real-time adjustment are removed.
 - The left analog stick presses the d-pad while the pad is in digital mode, so digital-only games can use either stick.
 
 ## v2.13
