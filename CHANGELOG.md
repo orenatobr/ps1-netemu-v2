@@ -4,7 +4,7 @@ The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release t
 
 ## v2.14
 - The emulator's vibration switch (`X + 0x84`) is kept on: the actuator clears it on every update and the pad thread no longer sets it.
-- Setting 49 of the emulator is always read without its two display bits (second geometry path and extra picture stages), whatever the console has saved. The menu options Screen mode and Smoothing are not in the emulator settings (measured), so they stay as the system menu has them: keep Normal and Disabled.
+- The menu options Screen mode and Smoothing cannot be forced from the emulator code (none of its 61 settings changed when Smoothing was switched on), so they stay with the system menu: keep Normal and Disabled.
 - Final Fantasy VII starts with the picture 8 lines lower, by the serial of the game. SELECT + UP / DOWN moves the top by 2 lines (0 to 24) and SELECT + RIGHT / LEFT the end (0 to 16) for any game; nothing adjusts by itself and the adjust resets when the emulator starts. Castlevania SotN starts 20 lines lower and ends 4 earlier too, only while it plays (256 wide): its menus (384 wide) use every line.
 - In digital mode the right stick X axis presses L1 (left) and R1 (right).
 - The d-pad is pressed by the left analog stick (the right stick was the first version; the owner asked for the left one).

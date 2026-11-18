@@ -22,7 +22,6 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from cave_analog import build as _analog_cave
 from cave_dpad import build as _dpad_cave
-from cave_display import build as _display_cave
 from cave_memcard import build as _memcard_cave
 from cave_overscan import build as _overscan_cave
 from ps3mapi_patch import CODE, CONSTANTS
@@ -54,13 +53,10 @@ class Patch:
 ANALOG_VA = CAVE_VA + 0x1000
 DPAD_VA = CAVE_VA + 0xA00
 OVERSCAN_VA = CAVE_VA + 0xC00
-DISPLAY_VA = CAVE_VA + 0x1100
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
 _DPAD, _DPAD_BYTES = _dpad_cave(DPAD_VA)
 _OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
-_DISPLAY, _DISPLAY_BYTES = _display_cave(DISPLAY_VA)
-assert _DISPLAY_BYTES <= CAVE_SIZE - (DISPLAY_VA - CAVE_VA)
 assert _MEMCARD_BYTES <= DPAD_VA - CAVE_VA and _DPAD_BYTES <= OVERSCAN_VA - DPAD_VA
 assert _OVERSCAN_BYTES <= ANALOG_VA - OVERSCAN_VA
 assert ANALOG_VA - CAVE_VA + _ANALOG_BYTES <= CAVE_SIZE
@@ -71,7 +67,6 @@ PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in _ANALOG),
     *(Patch(a, old, new, why) for a, old, new, why in _DPAD),
     *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
-    *(Patch(a, old, new, why) for a, old, new, why in _DISPLAY),
 )
 
 
