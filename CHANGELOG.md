@@ -4,7 +4,8 @@ The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release t
 
 ## v2.14
 - The emulator's vibration switch (`X + 0x84`) is kept on: the actuator clears it on every update and the pad thread no longer sets it.
-- Castlevania: Symphony of the Night and Final Fantasy VII start with the picture where their own black bars end (20 lines lower and 4 earlier, and 8 lines lower), by the serial of the game. SELECT + UP / DOWN moves the top by 2 lines (0 to 24) and SELECT + RIGHT / LEFT the end (0 to 16) for any game; nothing adjusts by itself and the adjust resets when the emulator starts.
+- The emulator always starts in Screen mode Normal with Smoothing Disabled, whatever the console has saved: both options broke the picture and are forced off in the settings reader.
+- Final Fantasy VII starts with the picture 8 lines lower, by the serial of the game. SELECT + UP / DOWN moves the top by 2 lines (0 to 24) and SELECT + RIGHT / LEFT the end (0 to 16) for any game; nothing adjusts by itself and the adjust resets when the emulator starts. Castlevania SotN needs 20 lines lower and 4 earlier in play but its menus use every line, so it has no default.
 - In digital mode the right stick X axis presses L1 (left) and R1 (right).
 - The d-pad is pressed by the left analog stick (the right stick was the first version; the owner asked for the left one).
 - Overscan shows the lines the game declares, clipped to the video lines 16 to 248 and stretched over the frame: no black bands (the Megaman X5 menu ends at line 248), its top is kept and nothing adjusts while a game runs. The formula keeps every register the display handler reads afterwards as the stock code leaves it. The content-aware crop and its real-time adjustment are removed.

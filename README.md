@@ -187,15 +187,23 @@ the top and the end of the game), and no fixed window can remove them without cu
 every line (Megaman X5). Two things handle it:
 
 * **Defaults per game.** The cave reads the card name of the game (`SLUS-00067.VM1`, kept at `0x1BE780` by feature 4) and,
-  for the games measured on the owner's console, starts the picture lower and ends it earlier:
-  Castlevania SotN (`SLUS-00067`) 20 lines lower and 4 earlier, Final Fantasy VII (`SCUS-94163`, the card of disc 1 is
-  shared by the three discs) 8 lines lower. Every other game keeps lines 16 to 248.
+  for the games measured on the owner's console, starts the picture lower: Final Fantasy VII (`SCUS-94163`, the card of
+  disc 1 is shared by the three discs) 8 lines lower. Every other game keeps lines 16 to 248. Castlevania SotN needs 20 lines
+  lower and 4 earlier while it plays, but its menus use every line and were cut, so it has no default yet (use the adjust).
 * **Your adjust on top.** Hold **SELECT** and press **UP** or **DOWN** to start the picture 2 lines lower or higher (up
   to 24), **RIGHT** or **LEFT** to end it 2 lines earlier or later (up to 16). A press moves it once, nothing moves by
   itself, and it returns to 0 when the emulator starts again. Only the first pad reads it.
 
 To add a game, hold SELECT and press UP until its bar is gone, count the presses and add `serial: (2 * presses, ...)` to `GAMES`
 in `cave_overscan.py` (the serial is the name of its card in `/dev_hdd0/savedata/vmc`).
+
+
+### 10. Screen mode Normal and Smoothing Disabled, always
+
+The two options of the emulator menu (Settings, Display) live in setting 49 of the emulator: bit 0 picks the second geometry
+path of the display handler (not the one the overscan formula patches) and bit 1 turns the smoothing stages on. Both broke
+the picture the cave builds. `cave_display.py` makes the settings reader (`0xb65f0`) return setting 49 with both bits clear,
+so the emulator always runs in Normal mode without smoothing, whatever the console has saved, and the menu shows it that way.
 
 ### Tests
 

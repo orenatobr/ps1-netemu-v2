@@ -24,7 +24,6 @@ NAME_OFF = -0x1880  # the card name of the game (cave_percard NAME_VA 0x1BE780, 
 DELTA, DELTA_END = -0x18A0, -0x1894  # the owner's adjust of the top and of the end (cave_dpad.py), in lines
 # serial -> (lines to start lower, lines to end earlier), measured on the owner's console
 GAMES = {
-    "SLUS-00067": (20, 4),  # Castlevania: Symphony of the Night draws lines 36 to 243 of 16 to 256
     "SCUS-94163": (8, 0),  # Final Fantasy VII (all three discs share the card of disc 1)
 }
 HOOK_VA = 0x115AE0  # stock: b 0x115820

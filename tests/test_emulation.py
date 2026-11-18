@@ -989,7 +989,7 @@ def _expect(first, last, y1d=16, y2d=256):
 
 
 @pytest.mark.parametrize("name,first,last", [
-    (b"SLUS-00067.VM1", 36, 244),  # Castlevania: Symphony of the Night
+    (b"SLUS-00067.VM1", 16, 248),  # Castlevania keeps the default: its menus use every line
     (b"SCUS-94163.VM1", 24, 248),  # Final Fantasy VII
     (b"SLUS-00664.VM1", 16, 248),  # Xenogears keeps the default
     (b"", 16, 248),  # no card name known
@@ -1022,3 +1022,31 @@ def test_the_end_adjust_stops_at_its_limit(cave_elf):
         _press(cpu, IDLE & ~SEL & ~0x2000)
         _press(cpu, IDLE)
     assert cpu.rd(ADJ_END, 4) == D.MAX_END
+
+
+# ---- the display options of the emulator menu ----------------------------------------------------------
+
+SETTINGS_BASE, SETTING_RET = 0x42100000, 0x42200000
+
+
+def _setting(elf, index, value):
+    """Run the emulator's settings reader (0xb65f0) for `index` with `value` stored and return what it gives back."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.lr = STACK, TOC, index, SETTING_RET
+    cpu.wr(TOC - 0x7E94, 4, SETTINGS_BASE)
+    cpu.wr(SETTINGS_BASE + 0x14 + 4 * index, 4, value)
+    cpu.run(0xB65F0, {SETTING_RET})
+    return cpu.r[3]
+
+
+@pytest.mark.parametrize("value", [0x0, 0x1, 0x2, 0x3, 0xFF, 0x12345677])
+def test_screen_mode_and_smoothing_are_always_normal_and_off(elfs, value):
+    stock, patched = elfs
+    assert _setting(stock, 49, value) == value  # the stock reader gives the saved configuration
+    assert _setting(patched, 49, value) == value & ~3
+
+
+@pytest.mark.parametrize("index", [0, 3, 48, 50, 51, 60])
+def test_the_other_settings_are_untouched(elfs, index):
+    _, patched = elfs
+    assert _setting(patched, index, 0xFF) == 0xFF
