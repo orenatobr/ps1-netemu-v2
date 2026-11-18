@@ -1,4 +1,4 @@
-"""Build ps1_netemu_v2.00.self from a stock ps1_netemu.self.
+"""Build the patched ps1_netemu .self from a stock ps1_netemu.self.
 
 The stock SELF container is kept: header, offsets and sizes do not move. Each segment
 is decrypted, patched, recompressed to the SAME stored size (zlib, padded with empty

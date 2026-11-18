@@ -1,7 +1,7 @@
-# ps1_netemu v2.00
+# ps1_netemu
 
-A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package for it. The package is always
-`ps1_netemu_v2.00.pkg` (patch version 2.00); the release tag counts the published builds (see `CHANGELOG.md`).
+A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package for it. The package is
+`ps1_netemu_v<version>.pkg`, where `<version>` is the release tag without the `v` (file `VERSION`); what changed in each release is in `CHANGELOG.md`.
 
 ## Features
 
@@ -102,7 +102,7 @@ inserted into slot 1 through the emulator's own path at `0xb4124`. A card counts
 
 ### 7. Installer
 
-`ps1_netemu_v2.00.pkg` installs the app **PS1 Emulator Patch** (English and Portuguese). It saves the original to
+`ps1_netemu_v<version>.pkg` installs the app **PS1 Emulator Patch** (English). It saves the original to
 `/dev_hdd0/ps1_netemu_stock.self` first, checks every write by hash, refuses any `ps1_netemu.self` that is not the
 one build the patch was made for (SHA-256 `27d4121e...ebdd5d`), restores the original with Triangle, and warns on
 screen when the patch is installed without a backup.
@@ -119,10 +119,11 @@ are told apart; a multitap pad 2 or 3 reads the flag of pad 1.
 
 ## Install
 
-1. Copy `ps1_netemu_v2.00.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it from the XMB
+1. Copy `ps1_netemu_v<version>.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it from the XMB
    (Game > Package Manager > Install Package Files).
 2. Open **PS1 Emulator Patch**. Press **Cross** (or Circle with the Japanese layout) to install, **Triangle** to
-   restore the original, the other face button to exit.
+   restore the original, the other face button to exit. A progress bar with the current stage and a percentage
+   shows while it works; do not turn off the console until it ends.
 3. Close the game and open it again: the emulator reads its file at launch.
 
 The backup is only made when the app finds the original on the console. If the patched file was put there by
@@ -130,8 +131,8 @@ another route first, there is no backup and **Triangle** answers "no backup": co
 `27d4121e...`) to `/dev_hdd0/ps1_netemu_stock.self` yourself. If a game fails to start, restore the original.
 
 The `.self` is embedded in the package and is not offered as a separate download: a deliberate deviation from the
-original goal (a downloadable `ps1_netemu_v2.00.self`), made at the owner's request ("então não precisa ter o .self
-no release latest"). To use the file directly, build it (below) and copy `ps1_netemu_v2.00.self` to
+original goal (a downloadable `ps1_netemu_v<version>.self`), made at the owner's request ("então não precisa ter o .self
+no release latest"). To use the file directly, build it (below) and copy `ps1_netemu_v<version>.self` to
 `/dev_flash/ps1emu/ps1_netemu.self`: the flash must be mounted writable (webMAN: open `http://<ps3-ip>/dev_blind`),
 webMAN's FTP cannot rename over an existing file (delete the old one first), and a copy of the original must be kept.
 
@@ -175,7 +176,7 @@ The patcher checks the original bytes at every site and refuses anything else.
 
 ```
 pip install -r requirements-dev.txt
-python ps1_netemu_patch.py ps1_netemu.self ps1_netemu_v2.00.self
+python ps1_netemu_patch.py ps1_netemu.self ps1_netemu_v<version>.self
 PS1_NETEMU_SELF=ps1_netemu.self python -m pytest -q tests
 ```
 
@@ -226,7 +227,7 @@ Needs the [ps3dev](https://github.com/ps3dev/ps3dev) toolchain (`PS3DEV` and `PS
 python ps1_netemu_patch.py ps1_netemu.self installer/payload/ps1_netemu_v2.bin
 cd installer
 make pkg            # PS1NetemuPatch.gnpdrm.pkg
-tools/dist.sh       # ../dist/ps1_netemu_v2.00.pkg, ps1_netemu_v2.00.self, SHA256SUMS
+tools/dist.sh       # ../dist/ps1_netemu_v<version>.pkg, ps1_netemu_v<version>.self, SHA256SUMS (needs a CHANGELOG.md section for the version)
 tests/run.sh        # install/restore logic, runs on the Mac
 tools/preview.sh    # renders the app screens to PNG on the Mac
 ```
@@ -268,3 +269,9 @@ reading the RSX video memory (`0xC0xxxxxx`) is not possible through it.
 ## Restore
 
 The package app (Triangle), or copy the original back the same way you installed.
+
+## Release
+
+1. Put the new version in `VERSION` and its notes in a `## v<version>` section at the top of `CHANGELOG.md`.
+2. Build and package as above (`make pkg`, `tools/dist.sh`).
+3. `gh release create v<version> ../dist/* --target main --latest --title v<version> --notes-file <(tools/release_notes.sh)`

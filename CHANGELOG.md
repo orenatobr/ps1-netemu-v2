@@ -1,15 +1,22 @@
 # Changelog
 
-The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release tag counts the published builds.
+Every release lists what changed here, newest first. The section of a version is its release notes: `installer/tools/release_notes.sh` prints it and `installer/tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the package and the app show it, the tag is `v<version>`.
 
-## v2.15
-- Every game is drawn with the same width in the 4:3 window. The stock quad took its left and right ends from the horizontal range the game declares, so Final Fantasy VII came out narrower than Megaman X5 (measured on the TV). Both ends are now the nominal ones (+-640/720 of the window) whatever the game declares or the width mode (the stock 384 mode used 672/720): three instructions at `0x1158ec`, `0x1158f4` and `0x115b48`, no code cave.
+## v2.18
+- The app is in English only (the Portuguese texts are gone).
+- The app, the package and the file names carry the real release version instead of "2.00": the app title and "Patched (v...)" line, the package version in the XMB, `ps1_netemu_v<version>.pkg` and `.self`. It comes from the new `VERSION` file at build time.
+- Install and Restore show a progress bar with the stage (checking the package, reading, writing, verifying) and a percentage, and keep redrawing while the flash is written. Before, the screen froze for the whole operation and looked hung. Same patch as v2.15.
+- The bottom bar shows controller button icons (cross, triangle, circle, matching the confirm button of the console) instead of the letters "X", "Triangle" and "O".
+- The changelog is now the source of each release's notes.
 
 ## v2.17
 - The installer updates an older patched build (for example v2.14) when the original is safe in `/dev_hdd0/ps1_netemu_stock.self`. It used to show "Unknown build" and refuse, so no update could be installed over a previous patch. An unknown file without a valid backup is still refused. Same patch as v2.15.
 
 ## v2.16
 - The installer works when `/dev_blind` is already mounted by webMAN: the mount fails then, and the app wrongly reported "needs custom firmware". It now checks that the emulator file is reachable and only unmounts what it mounted itself. Same patch as v2.15.
+
+## v2.15
+- Every game is drawn with the same width in the 4:3 window. The stock quad took its left and right ends from the horizontal range the game declares, so Final Fantasy VII came out narrower than Megaman X5 (measured on the TV). Both ends are now the nominal ones (+-640/720 of the window) whatever the game declares or the width mode (the stock 384 mode used 672/720): three instructions at `0x1158ec`, `0x1158f4` and `0x115b48`, no code cave.
 
 ## v2.14
 - The emulator's vibration switch (`X + 0x84`) is kept on: the actuator clears it on every update and the pad thread no longer sets it.

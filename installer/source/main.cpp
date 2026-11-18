@@ -28,7 +28,7 @@ int main() {
     int width = 0, height = 0;
     if (!ps3::videoInit(width, height)) return 1;
     ps3::inputInit();
-    const ui::Text& t = ps3::portuguese() ? ui::kPt : ui::kEn;
+    const ui::Text& t = ui::kEn;
     gfx::Canvas canvas(width, height, ps3::fontBytes(false), ps3::fontBytes(true));
 
     const bool mountedByUs = sysLv2FsMount("CELL_FS_IOS:BUILTIN_FLSH1", "CELL_FS_FAT", "/dev_blind", 0) == 0;
@@ -43,11 +43,28 @@ int main() {
     if (!mounted) note = t.noAccess;
     else if (state == installer::State::Patched && !fsx::exists(kBackup)) note = t.patchedNoBackup;
 
+    // Redraws the progress screen whenever the percentage or the stage changes (install and restore take a while:
+    // the flash is slow and the hashing runs on the CPU, so without this the screen looked frozen).
+    bool installing = true;
+    int lastPct = -1;
+    installer::Stage lastStage = installer::Stage::Package;
+    const installer::Progress show = [&](installer::Stage stage, float fraction) {
+        const int pct = static_cast<int>(fraction * 100);
+        if (pct == lastPct && stage == lastStage) return;
+        lastPct = pct;
+        lastStage = stage;
+        ps3::pump();
+        ui::drawProgress(canvas, t, installing, stage, fraction);
+        ps3::videoPresent(canvas.pixels());
+    };
+
     while (!ps3::quitRequested()) {
         ps3::pump();
         const ps3::Input in = ps3::poll();
         if (mounted && (in.a || in.x)) {
-            const installer::Outcome o = in.a ? installer::install(cfg, payload) : installer::restore(cfg);
+            installing = in.a;
+            lastPct = -1;
+            const installer::Outcome o = in.a ? installer::install(cfg, payload, show) : installer::restore(cfg, show);
             note = ui::message(t, o);
             noteOk = o.ok;
             state = installer::detect(cfg);

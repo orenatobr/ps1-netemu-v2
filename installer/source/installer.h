@@ -2,15 +2,18 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
+
+#include "fsx.h"
 
 namespace installer {
 
 using Bytes = std::vector<std::uint8_t>;
 
-/// Lowercase hex SHA-256.
-std::string sha256(const Bytes& data);
+/// Lowercase hex SHA-256. `onChunk` is called about every 64 KB so a caller can draw a progress bar.
+std::string sha256(const Bytes& data, const fsx::Chunk& onChunk = nullptr);
 
 struct Config {
     std::string target;     ///< The emulator file on the console (/dev_blind/ps1emu/ps1_netemu.self).
@@ -27,13 +30,19 @@ struct Outcome {
     std::string code;
 };
 
+/// What install() and restore() are doing, in the order they happen (the screen shows one line per stage).
+enum class Stage { Package, Read, Backup, Write, Verify, Final };
+
+/// Called while install() or restore() runs with the stage and the overall fraction done (0 to 1, never going back).
+using Progress = std::function<void(Stage stage, float fraction)>;
+
 /// Reads the target and tells which build it is.
 State detect(const Config& cfg);
 
 /// Backs the stock file up, then replaces it with `payload`. Refuses any file that is not the known stock build.
-Outcome install(const Config& cfg, const Bytes& payload);
+Outcome install(const Config& cfg, const Bytes& payload, const Progress& progress = nullptr);
 
 /// Puts the backed-up stock file back.
-Outcome restore(const Config& cfg);
+Outcome restore(const Config& cfg, const Progress& progress = nullptr);
 
 }  // namespace installer

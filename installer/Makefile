@@ -30,10 +30,15 @@ INCLUDES	:=	source third_party/stb
 # sha256 of the payload, compiled in so the installer refuses any other build
 PATCHED_SHA256	:=	$(shell shasum -a 256 $(MKROOT)payload/ps1_netemu_v2.bin | cut -d' ' -f1)
 
+# release version, the single source for the app title, the package version and the file names (../VERSION)
+VERSION		:=	$(shell cat $(MKROOT)../VERSION)
+APP_VER		:=	$(shell printf '%02d.%02d' $(word 1,$(subst ., ,$(VERSION))) $(word 2,$(subst ., ,$(VERSION))))
+
 TITLE		:=	PS1 Emulator Patch
 APPID		:=	PS1NMPTCH
 CONTENTID	:=	UP0001-$(APPID)_00-0000000000000000
-SFOXML		:=	$(MKROOT)pkg/sfo.xml
+SFOXML		:=	$(MKROOT)build/sfo.xml
+$(shell mkdir -p $(MKROOT)build && sed 's/@APP_VER@/$(APP_VER)/' $(MKROOT)pkg/sfo.xml > $(SFOXML))
 ICON0		:=	$(MKROOT)pkg/ICON0.PNG
 PKGFILES	:=	
 
@@ -42,7 +47,7 @@ PKGFILES	:=
 # options for code generation
 #---------------------------------------------------------------------------------
 CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
-CXXFLAGS	=	$(CFLAGS) $(CXXFLAGS_INIT) -std=gnu++20 -DPATCHED_SHA256=\"$(PATCHED_SHA256)\"
+CXXFLAGS	=	$(CFLAGS) $(CXXFLAGS_INIT) -std=gnu++20 -DPATCHED_SHA256=\"$(PATCHED_SHA256)\" -DAPP_VERSION=\"$(VERSION)\"
 
 LDFLAGS		=	$(MACHDEP) -Wl,-Map,$(notdir $@).map
 
