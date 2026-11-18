@@ -27,8 +27,8 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-NTSC_STRETCH = 240 / 224  # screen lines / window lines: DuckStation's fixed overscan window fills the frame
-OVERSCAN_START = 24  # first line of that window (it ends at line 248)
+NTSC_STRETCH = 1.0  # only the stock NTSC prologue still loads it; the quad comes from cave_overscan.py
+OVERSCAN_START, OVERSCAN_END = 16, 256  # the active video lines the quad may show
 PAL_STRETCH = 1.0  # PAL keeps the stock 1:1 window
 
 
@@ -45,8 +45,8 @@ CODE = (
     (0x115814, 0xC8E100C0, 0xC80100C0, "PAL: lfd f0"),
     (0x115818, 0xFCE03E9C, 0xFC00069C, "PAL: fcfid f0"),
     (0x11581C, 0xFC003818, 0xC0E287FC, "PAL: f7 = 0.0"),
-    # NTSC block: f13 = first line of the window (24), f6 = 2*s, f0 = Y1, f7 = 0.0
-    (0x115AC4, 0xC1A28894, 0xC1A2AA24, "NTSC: f13 = 24 (free slot)"),
+    # NTSC block: f13 = first line of the window, f6 = 2*s, f0 = Y1, f7 = 0.0
+    (0x115AC4, 0xC1A28894, 0xC1A2AA24, "NTSC: f13 = first line (free slot)"),
     (0x115AC8, 0x79200020, 0xC0C2AA20, "NTSC: f6 = 2*s (free slot)"),
     (0x115AD0, 0xF80100C0, 0xF92100C0, "NTSC: std r9"),
     (0x115AD4, 0xC86100C0, 0xC80100C0, "NTSC: lfd f0"),
@@ -67,7 +67,7 @@ CONSTANTS = (
     (0x1BE750, f32(2 * NTSC_STRETCH)),
     (0x1BE754, f32(OVERSCAN_START)),
     (0x1BE758, f32(2 * PAL_STRETCH)),
-    (0x1BE75C, f32(248.0)),  # the end of the window, for cave_overscan.py
+    (0x1BE75C, f32(OVERSCAN_END)),  # the end of the window, for cave_overscan.py
 )
 
 

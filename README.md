@@ -23,15 +23,15 @@ in a PowerPC interpreter against the real emulator code).
 
 ### 1. Overscan 4:3, DuckStation style
 
-DuckStation's default crop ("Overscan") is a fixed window of video lines 24 to 248 (`NTSC_OVERSCAN_VERTICAL_ACTIVE_*` in
-`gpu.cpp`), stretched over the whole frame whatever the game programs with `GP1` (lines `Y1` to `Y2`). Black lines the
-game leaves outside its display range fall inside the window only where they are within 24..248, so a game that declares
-216 lines (Xenogears, 26 to 242) shows 2 black lines above and 6 below, spread over the frame, not 10 and 14.
-The stock formula mapped lines 16 to 256 one to one. Here the quad ends become `y = 2*s*(Y - 24)/H - 1` with
-`s = 240/224`: the stock doubling (`fadds`) at `0x115894` and `0x1158a0` is a `fmuls` by `f6 = 2*s` and the first line comes
-from a free TOC slot. Lines above 24 and below 248 fall off the frame, as in DuckStation. The result depends only on what
-the game declares, so nothing adjusts while you play. The width is the emulator's own: the image stays 4:3. PAL keeps
-the stock behavior (`f6 = 2`).
+DuckStation shows the lines the game declares with `GP1` (`Y1` to `Y2`) filling the frame and never adjusts anything
+while a game runs. Here the quad that shows the picture takes the declared range clipped to the active video lines 16 to
+256 and stretches it over the frame: a game that declares all 240 lines (Megaman X5) loses none, a game that declares
+less (Xenogears, lines 26 to 242) has no black lines at the edges. `cave_overscan.py` runs a verbatim copy of the stock
+formula's tail, so everything the rest of the display handler reads (the texture span in `f1`, the width in `f3`, the
+interlace compare) is exactly what the stock code leaves, and then replaces only the quad's top and bottom:
+`2*(Y1 - first)/span - 1` and `2*(Y2 - first)/span - 1`, where `first` is `max(Y1, 16)` and `span` is
+`min(Y2, 256) - first`. The result depends only on what the game declares, so nothing adjusts while you play. The width
+is the emulator's own: the image stays 4:3. PAL keeps the stock formula.
 
 Two earlier designs were removed. v2.08 to v2.13 cropped the picture to the draw area (`GP0 E3/E4`) with a remembered
 window: it adjusted in real time and cut Xenogears and Final Fantasy VII battles. v2.14 first anchored the picture to
