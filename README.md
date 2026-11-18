@@ -23,18 +23,18 @@ in a PowerPC interpreter against the real emulator code).
 
 ### 1. Overscan 4:3, DuckStation style
 
-DuckStation shows a fixed vertical window and never changes it while a game runs; this does the same. The stock formula
-showed 224 video lines (24 to 248) of the display the game declares, which cut the top and the bottom of games that use
-all 240 lines. The patched formula (`ps3mapi_patch.py`, NTSC block at `0x115ac0` and the shared code up to `0x1158b0`)
-shows the 240 lines from video line 16 (`s = 1.0`, `c1 = 16`): a game that declares 240 lines loses none, a game
-that declares fewer (224 for Final Fantasy VII outside battle) is stretched over the frame, and a game that starts
-after line 16 is anchored to its own first line so no black bar is left on top. The result depends only on the lines
-the game declares (`GP1` display range), never on what it draws, so nothing adjusts while you play. The width is the
-emulator's own: the image stays 4:3. PAL, 480i and the lines above 16 keep the stock behavior.
+DuckStation shows the 240 NTSC lines from video line 16 to 256 and puts every line of the game's picture where a TV
+would: the display range the game programs (`GP1`, lines `Y1` to `Y2`) lands at its own place and is never stretched.
+The stock formula did the same for 224 lines (24 to 248), which cut the top and the bottom of games that use all 240.
+Here the constants of the stock formula change (`s = 1.0`, `c1 = 16`, in free TOC slots), and nothing else: a game
+that declares 240 lines fills the frame, Xenogears (lines 26 to 242) has 10 black lines above and 14 below, as on a
+TV, and lines above 16 are cropped. The result depends only on what the game declares, so nothing adjusts while you
+play. The width is the emulator's own: the image stays 4:3. PAL keeps the stock behavior.
 
-A black band the game draws itself (the bottom of Final Fantasy VII battles) stays, as it does in DuckStation. An
-earlier version (v2.08 to v2.13) cropped the picture to the draw area (`GP0 E3/E4`) with a remembered window; it
-adjusted the picture in real time and cut Xenogears and Final Fantasy VII battles, so it was removed.
+Two earlier designs were removed. v2.08 to v2.13 cropped the picture to the draw area (`GP0 E3/E4`) with a remembered
+window: it adjusted in real time and cut Xenogears and Final Fantasy VII battles. v2.14 first anchored the picture to
+the game's first line and stretched it over the frame: it zoomed the declared lines (216 over 240 for Xenogears) and
+cut what the game draws below them.
 
 ### 2. Automatic analog mode
 

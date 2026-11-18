@@ -3,7 +3,7 @@
 The package is always `ps1_netemu_v2.00.pkg` (patch version 2.00); the release tag counts the published builds.
 
 ## v2.14
-- Overscan is a fixed 240-line window again (DuckStation style): the content-aware crop and its real-time adjustment are removed. Xenogears and Final Fantasy VII battles no longer lose lines or readjust.
+- Overscan is the DuckStation window again: 240 lines from video line 16, every line where a TV would show it, no anchoring, no stretching. The content-aware crop and its real-time adjustment are removed, so nothing adjusts while a game runs.
 - The left analog stick presses the d-pad while the pad is in digital mode, so digital-only games can use either stick.
 
 ## v2.13

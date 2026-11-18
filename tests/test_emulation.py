@@ -712,17 +712,23 @@ def _base_quad(elf, y1d, y2d, height=240):
     return cpu.f[7], cpu.f[4]
 
 
-@pytest.mark.parametrize("y1d,y2d", [(16, 256), (16, 0), (24, 264), (28, 242)])
-def test_the_base_formula_shows_every_declared_line(elfs, y1d, y2d):
+@pytest.mark.parametrize("y1d,y2d,top,bottom", [
+    (16, 256, -1.0, 1.0),  # all 240 lines: the whole frame
+    (16, 0, -1.0, 1.0),  # no end line declared: 240 lines
+    (26, 242, -1 + 2 * 10 / 240, -1 + 2 * 226 / 240),  # Xenogears: 216 lines, 10 black lines above and 14 below
+    (28, 242, -1 + 2 * 12 / 240, -1 + 2 * 226 / 240),
+])
+def test_the_base_formula_puts_every_line_where_the_tv_would_show_it(elfs, y1d, y2d, top, bottom):
+    """DuckStation: a 240 line window from video line 16, no anchoring and no stretching."""
     _, patched = elfs
     y1, y2 = _base_quad(patched, y1d, y2d)
-    assert (y1, y2) == (-1.0, 1.0)  # no fixed window: nothing is cut and nothing is left empty
+    assert (y1, y2) == pytest.approx((top, bottom), abs=1e-5)
 
 
 def test_the_base_formula_still_crops_lines_above_the_visible_start(elfs):
     _, patched = elfs
     y1, y2 = _base_quad(patched, 8, 248)
-    assert y1 < -1.0 and y2 == 1.0  # lines 8..15 are off the TV area
+    assert y1 < -1.0 and y2 < 1.0  # lines 8..15 are off the TV area, the picture ends at line 248
 
 
 def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):

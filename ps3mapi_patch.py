@@ -51,16 +51,6 @@ CODE = (
     (0x115AD4, 0xC86100C0, 0xC80100C0, "NTSC: lfd f0"),
     (0x115AD8, 0xFC601E9C, 0xFC00069C, "NTSC: fcfid f0"),
     (0x115ADC, 0xFC001818, 0xC0E287FC, "NTSC: f7 = 0.0"),
-    # shared: top = s*(Y1-24); clamp to <= 0 (anchor to the game's start); bottom = top + s*rows
-    (0x115824, 0xED806828, 0xED8069B8, "top    = s * (Y1 - c1)"),
-    (0x115860, 0xFD605E9C, 0xFD405E9C, "f10 = frame height, converted directly"),
-    (0x115864, 0xFD405818, 0x60000000, "nop (the frsp was redundant)"),
-    (0x11586C, 0x419A0008, 0xEDA151B8, "f13 = s*rows - height (r30 is always 0 here: branch was always taken)"),
-    (0x115870, 0xED8C602A, 0xFD8C61EE, "top    = min(top, 0)"),
-    (0x115874, 0xEDAC082A, 0xEDAD602A, "f13 = (top + s*rows) - height"),
-    (0x115890, 0xFC601E9C, 0xFD801E9C, "f12 = width, converted directly"),
-    (0x11589C, 0xFD801818, 0xFDAD3B6E, "bottom overshoot = max(overshoot, 0): fill the screen"),
-    (0x1158AC, 0xEC8D1028, 0xEC8D102A, "y1 = 1 + overshoot"),
     # vibration: the actuator function (0xeb198) used to send force only through a chain of conditions (the
     # internal block flag at X+0x84 and a strength curve built from settings 50 and 51). The motors now get
     # exactly what the game commands: small motor = r28 (on/off), large motor = r30 (0..255).
