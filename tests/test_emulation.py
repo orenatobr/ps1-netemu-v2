@@ -960,3 +960,65 @@ def test_the_quad_starts_the_adjusted_number_of_lines_lower(elfs, delta):
     cpu.run(0x115AC0, {0x1158B0})
     k = 2 / (248 - (16 + delta))
     assert (cpu.f[7], cpu.f[4]) == pytest.approx((k * (16 - (16 + delta)) - 1, k * (256 - (16 + delta)) - 1), abs=1e-4)
+
+
+# ---- per-game defaults and the end of the picture ------------------------------------------------------
+
+NAME_VA = 0x1BE780  # the card name cave_percard leaves for the game, "SLUS-00067.VM1"
+ADJ_END = 0x1BE76C
+
+
+def _quad_with(patched, name=b"", top=0, end=0, y1d=16, y2d=256):
+    cpu = Cpu(patched)
+    cpu.wr(ADJ_DELTA, 4, top)
+    cpu.wr(ADJ_END, 4, end)
+    for i, b in enumerate(name + b"\0"):
+        cpu.wr(NAME_VA + i, 1, b)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+    cpu.wr(FRAME + 0x1C, 4, y1d)
+    cpu.wr(FRAME + 0x20, 4, y2d)
+    cpu.wr(FRAME + 0xC, 4, 240)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+    cpu.run(0x115AC0, {0x1158B0})
+    return cpu.f[7], cpu.f[4]
+
+
+def _expect(first, last, y1d=16, y2d=256):
+    k = 2 / (last - first)
+    return k * (y1d - first) - 1, k * (y2d - first) - 1
+
+
+@pytest.mark.parametrize("name,first,last", [
+    (b"SLUS-00067.VM1", 36, 244),  # Castlevania: Symphony of the Night
+    (b"SCUS-94163.VM1", 24, 248),  # Final Fantasy VII
+    (b"SLUS-00664.VM1", 16, 248),  # Xenogears keeps the default
+    (b"", 16, 248),  # no card name known
+])
+def test_the_known_games_get_their_own_window(elfs, name, first, last):
+    _, patched = elfs
+    assert _quad_with(patched, name) == pytest.approx(_expect(first, last), abs=1e-4)
+
+
+def test_the_owners_adjust_is_added_to_the_games_default(elfs):
+    _, patched = elfs
+    assert _quad_with(patched, b"SCUS-94163.VM1", top=4, end=6) == pytest.approx(_expect(28, 242), abs=1e-4)
+
+
+def test_select_right_and_left_move_the_end(cave_elf):
+    cpu = Cpu(cave_elf)
+    for n in (1, 2, 3):
+        _press(cpu, IDLE & ~SEL & ~0x2000)  # RIGHT
+        _press(cpu, IDLE)
+        assert cpu.rd(ADJ_END, 4) == 2 * n
+    for _ in range(5):
+        _press(cpu, IDLE & ~SEL & ~0x8000)  # LEFT
+        _press(cpu, IDLE)
+    assert cpu.rd(ADJ_END, 4) == 0
+
+
+def test_the_end_adjust_stops_at_its_limit(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(20):
+        _press(cpu, IDLE & ~SEL & ~0x2000)
+        _press(cpu, IDLE)
+    assert cpu.rd(ADJ_END, 4) == D.MAX_END

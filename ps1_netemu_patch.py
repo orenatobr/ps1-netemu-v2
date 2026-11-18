@@ -35,7 +35,7 @@ EXPECTED_KEY_REVISION = 0x1C
 EMPTY_STORED_BLOCK = b"\x00\x00\x00\xff\xff"  # non-final, zero-length deflate block
 CONTROL_OFF = 0x3A0  # control info; its last block holds the SHA-1 of the whole ELF
 CAVE_VA = 0x1A9380  # first aligned address after the stock text segment (ends 0x1a9368)
-CAVE_SIZE = 0x1000
+CAVE_SIZE = 0x1200
 ELF_DIGEST_OFF = CONTROL_OFF + 0x30 + 0x10 + 0x14  # type-1 block (0x30) + header (0x10) + magic (0x14)
 
 
@@ -50,7 +50,7 @@ class Patch:
 
 
 # Every change lives in ps3mapi_patch (single source of truth).
-ANALOG_VA = CAVE_VA + 0xE00
+ANALOG_VA = CAVE_VA + 0x1000
 DPAD_VA = CAVE_VA + 0xA00
 OVERSCAN_VA = CAVE_VA + 0xC00
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)

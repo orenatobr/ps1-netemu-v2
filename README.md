@@ -180,12 +180,22 @@ You need the stock `ps1_netemu.self` (APP, key revision 0x1C); it is not in this
 
 The right stick X axis (`+0xc` of the same copy) presses L1 when it goes left of `0x40` and R1 when it goes right of `0xC0`, again only while the pad is in digital mode.
 
-### 9. Top of the picture, adjusted by you
+### 9. Top and end of the picture, per game and adjusted by you
 
-Some games draw their own black bar at the top of the picture (Final Fantasy VII and Castlevania: Symphony of the Night),
-and no fixed window can remove it without cutting the top of a game that uses every line (Megaman X5). Hold **SELECT** and
-press **UP** to start the picture 2 lines lower (up to 24 lines), **DOWN** to go back. A press moves it once, nothing
-moves by itself, and it returns to 0 when the emulator starts again. Only the first pad reads it.
+Some games draw their own black bars inside the picture (Final Fantasy VII at the top, Castlevania: Symphony of the Night at
+the top and the end of the game), and no fixed window can remove them without cutting the top of a game that uses
+every line (Megaman X5). Two things handle it:
+
+* **Defaults per game.** The cave reads the card name of the game (`SLUS-00067.VM1`, kept at `0x1BE780` by feature 4) and,
+  for the games measured on the owner's console, starts the picture lower and ends it earlier:
+  Castlevania SotN (`SLUS-00067`) 20 lines lower and 4 earlier, Final Fantasy VII (`SCUS-94163`, the card of disc 1 is
+  shared by the three discs) 8 lines lower. Every other game keeps lines 16 to 248.
+* **Your adjust on top.** Hold **SELECT** and press **UP** or **DOWN** to start the picture 2 lines lower or higher (up
+  to 24), **RIGHT** or **LEFT** to end it 2 lines earlier or later (up to 16). A press moves it once, nothing moves by
+  itself, and it returns to 0 when the emulator starts again. Only the first pad reads it.
+
+To add a game, hold SELECT and press UP until its bar is gone, count the presses and add `serial: (2 * presses, ...)` to `GAMES`
+in `cave_overscan.py` (the serial is the name of its card in `/dev_hdd0/savedata/vmc`).
 
 ### Tests
 

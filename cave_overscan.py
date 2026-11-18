@@ -20,9 +20,39 @@ from __future__ import annotations
 
 from ppcasm import assemble
 
+NAME_OFF = -0x1880  # the card name of the game (cave_percard NAME_VA 0x1BE780, "SLUS-00067.VM1") from 0x1c0000
+DELTA, DELTA_END = -0x18A0, -0x1894  # the owner's adjust of the top and of the end (cave_dpad.py), in lines
+# serial -> (lines to start lower, lines to end earlier), measured on the owner's console
+GAMES = {
+    "SLUS-00067": (20, 4),  # Castlevania: Symphony of the Night draws lines 36 to 243 of 16 to 256
+    "SCUS-94163": (8, 0),  # Final Fantasy VII (all three discs share the card of disc 1)
+}
 HOOK_VA = 0x115AE0  # stock: b 0x115820
 RESUME = 0x1158AC  # fsubs f4,f13,f2 (f4 = f13 - 1), then the beq at 0x1158b0
 TOC_FIRST, TOC_TWO, TOC_LAST = -0x55DC, -0x55D8, -0x55D4  # 16.0, 2.0, 248.0
+
+
+def _table() -> list[tuple]:
+    """Leave (top, end) = the game's defaults + the owner's adjust at -0x20(r1) and -0x28(r1); r11 and r12 as before."""
+    ops: list[tuple] = [
+        ("std", "r11", -0x10, "r1"), ("std", "r12", -0x18, "r1"), ("li", "r0", 0),
+        ("std", "r0", -0x20, "r1"), ("std", "r0", -0x28, "r1"), ("lis", "r10", 0x1C),
+    ]
+    for k, (serial, (top, end)) in enumerate(GAMES.items()):
+        name = (serial + ".VM1").encode()
+        for w in range(3):
+            word = int.from_bytes(name[4 * w:4 * w + 4], "big")
+            ops += [("lwz", "r0", NAME_OFF + 4 * w, "r10"), ("lis", "r11", word >> 16), ("ori", "r11", "r11", word & 0xFFFF),
+                    ("cmpw", "r0", "r11"), ("bne", f"g{k}")]
+        ops += [("li", "r0", top), ("std", "r0", -0x20, "r1"), ("li", "r0", end), ("std", "r0", -0x28, "r1"),
+                ("b", "gdone"), ("label", f"g{k}")]
+    ops += [
+        ("label", "gdone"),
+        ("lwz", "r0", DELTA, "r10"), ("ld", "r11", -0x20, "r1"), ("add", "r11", "r11", "r0"), ("std", "r11", -0x20, "r1"),
+        ("lwz", "r0", DELTA_END, "r10"), ("ld", "r11", -0x28, "r1"), ("add", "r11", "r11", "r0"), ("std", "r11", -0x28, "r1"),
+        ("ld", "r11", -0x10, "r1"), ("ld", "r12", -0x18, "r1"),
+    ]
+    return ops
 
 
 def program() -> list[tuple]:
@@ -42,14 +72,15 @@ def program() -> list[tuple]:
         ("fadds", "f0", "f0", "f0"), ("fdivs", "f13", "f13", "f10"), ("frsp", "f12", "f3"),
         ("fadds", "f13", "f13", "f13"), ("fsubs", "f7", "f0", "f2"), ("fsubs", "f3", "f12", "f11"),
         # the quad: f0 = Y1, f10 = Y2 (r9 still holds Y1 for the stock code that follows)
+        *_table(),
         ("lwz", "r0", 0x20, "r22"), ("cmpwi", "r0", 0), ("bne", "has"), ("addi", "r0", "r9", 240),  # none: 240 lines
         ("label", "has"),
         ("std", "r9", 0xC0, "r1"), ("lfd", "f0", 0xC0, "r1"), ("fcfid", "f0", "f0"), ("frsp", "f0", "f0"),
         ("std", "r0", 0xC0, "r1"), ("lfd", "f10", 0xC0, "r1"), ("fcfid", "f10", "f10"), ("frsp", "f10", "f10"),
-        ("lis", "r10", 0x1C), ("lwz", "r10", -0x18A0, "r10"),  # the owner's top adjust (SELECT + UP / DOWN), in lines
-        ("std", "r10", 0xC0, "r1"), ("lfd", "f11", 0xC0, "r1"), ("fcfid", "f11", "f11"), ("frsp", "f11", "f11"),
-        ("lfs", "f12", TOC_FIRST, "r2"), ("fadds", "f11", "f11", "f12"),  # first = 16 + adjust
-        ("lfs", "f12", TOC_LAST, "r2"),
+        ("lfd", "f11", -0x20, "r1"), ("fcfid", "f11", "f11"), ("frsp", "f11", "f11"),
+        ("lfs", "f12", TOC_FIRST, "r2"), ("fadds", "f11", "f11", "f12"),  # first = 16 + the lines to start lower
+        ("lfd", "f12", -0x28, "r1"), ("fcfid", "f12", "f12"), ("frsp", "f12", "f12"),
+        ("lfs", "f13", TOC_LAST, "r2"), ("fsubs", "f12", "f13", "f12"),  # last = 248 - the lines to end earlier
         ("fsubs", "f13", "f0", "f11"), ("fsel", "f13", "f13", "f0", "f11"),  # f13 = max(Y1, 16)
         ("fsubs", "f4", "f10", "f12"), ("fsel", "f4", "f4", "f12", "f10"),  # f4 = min(Y2, 248)
         ("fsubs", "f6", "f4", "f13"), ("fsubs", "f7", "f6", "f2"),  # span; span - 1 < 0 means an empty range
