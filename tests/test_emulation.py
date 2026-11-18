@@ -968,7 +968,7 @@ NAME_VA = 0x1BE780  # the card name cave_percard leaves for the game, "SLUS-0006
 ADJ_END = 0x1BE76C
 
 
-def _quad_with(patched, name=b"", top=0, end=0, y1d=16, y2d=256):
+def _quad_with(patched, name=b"", top=0, end=0, y1d=16, y2d=256, width=320):
     cpu = Cpu(patched)
     cpu.wr(ADJ_DELTA, 4, top)
     cpu.wr(ADJ_END, 4, end)
@@ -978,6 +978,7 @@ def _quad_with(patched, name=b"", top=0, end=0, y1d=16, y2d=256):
     cpu.wr(FRAME + 0x1C, 4, y1d)
     cpu.wr(FRAME + 0x20, 4, y2d)
     cpu.wr(FRAME + 0xC, 4, 240)
+    cpu.wr(FRAME + 0x8, 4, width)
     cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
     cpu.run(0x115AC0, {0x1158B0})
     return cpu.f[7], cpu.f[4]
@@ -989,7 +990,6 @@ def _expect(first, last, y1d=16, y2d=256):
 
 
 @pytest.mark.parametrize("name,first,last", [
-    (b"SLUS-00067.VM1", 16, 248),  # Castlevania keeps the default: its menus use every line
     (b"SCUS-94163.VM1", 24, 248),  # Final Fantasy VII
     (b"SLUS-00664.VM1", 16, 248),  # Xenogears keeps the default
     (b"", 16, 248),  # no card name known
@@ -1050,3 +1050,19 @@ def test_screen_mode_and_smoothing_are_always_normal_and_off(elfs, value):
 def test_the_other_settings_are_untouched(elfs, index):
     _, patched = elfs
     assert _setting(patched, index, 0xFF) == 0xFF
+
+
+@pytest.mark.parametrize("width,first,last", [
+    (256, 36, 244),  # while it plays
+    (384, 16, 248),  # its menus use every line
+    (320, 16, 248),
+])
+def test_castlevania_gets_its_window_only_while_it_plays(elfs, width, first, last):
+    _, patched = elfs
+    assert _quad_with(patched, b"SLUS-00067.VM1", width=width) == pytest.approx(_expect(first, last), abs=1e-4)
+
+
+def test_final_fantasy_vii_does_not_depend_on_the_width(elfs):
+    _, patched = elfs
+    for width in (256, 320, 384, 640):
+        assert _quad_with(patched, b"SCUS-94163.VM1", width=width) == pytest.approx(_expect(24, 248), abs=1e-4)

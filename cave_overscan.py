@@ -22,9 +22,12 @@ from ppcasm import assemble
 
 NAME_OFF = -0x1880  # the card name of the game (cave_percard NAME_VA 0x1BE780, "SLUS-00067.VM1") from 0x1c0000
 DELTA, DELTA_END = -0x18A0, -0x1894  # the owner's adjust of the top and of the end (cave_dpad.py), in lines
-# serial -> (lines to start lower, lines to end earlier), measured on the owner's console
+# serial -> (lines to start lower, lines to end earlier, width in pixels or None for any), measured on the owner's console
 GAMES = {
-    "SCUS-94163": (8, 0),  # Final Fantasy VII (all three discs share the card of disc 1)
+    # Castlevania: Symphony of the Night draws lines 36 to 243 of 16 to 256 while it plays (256 wide); its menus are 384
+    # wide, start at line 256 of the VRAM and use every line
+    "SLUS-00067": (20, 4, 256),
+    "SCUS-94163": (8, 0, None),  # Final Fantasy VII (all three discs share the card of disc 1)
 }
 HOOK_VA = 0x115AE0  # stock: b 0x115820
 RESUME = 0x1158AC  # fsubs f4,f13,f2 (f4 = f13 - 1), then the beq at 0x1158b0
@@ -37,12 +40,14 @@ def _table() -> list[tuple]:
         ("std", "r11", -0x10, "r1"), ("std", "r12", -0x18, "r1"), ("li", "r0", 0),
         ("std", "r0", -0x20, "r1"), ("std", "r0", -0x28, "r1"), ("lis", "r10", 0x1C),
     ]
-    for k, (serial, (top, end)) in enumerate(GAMES.items()):
+    for k, (serial, (top, end, width)) in enumerate(GAMES.items()):
         name = (serial + ".VM1").encode()
         for w in range(3):
             word = int.from_bytes(name[4 * w:4 * w + 4], "big")
             ops += [("lwz", "r0", NAME_OFF + 4 * w, "r10"), ("lis", "r11", word >> 16), ("ori", "r11", "r11", word & 0xFFFF),
                     ("cmpw", "r0", "r11"), ("bne", f"g{k}")]
+        if width is not None:  # r22 + 8 is the width the game displays
+            ops += [("lwz", "r0", 8, "r22"), ("cmpwi", "r0", width), ("bne", f"g{k}")]
         ops += [("li", "r0", top), ("std", "r0", -0x20, "r1"), ("li", "r0", end), ("std", "r0", -0x28, "r1"),
                 ("b", "gdone"), ("label", f"g{k}")]
     ops += [
