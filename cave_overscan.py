@@ -1,133 +1,105 @@
-"""Code cave: crop the picture to the area the game really draws (content-aware vertical overscan).
+"""Code cave: the vertical overscan, the active video lines clipped to what the game declares.
 
-The display handler (0x113f0c) ends by storing the picture quad (x1, x2, y1, y2 in f6, f5, f7, f4) at
-0x114148. The hook there jumps here first. The GPU packet buffer (the object behind TOC slot -0x77f8,
-commands from +0x60) holds the draw-area commands GP0 E3 (top left) and E4 (bottom right). The code scans
-it for E3/E4 pairs with a plausible size (100..256 lines, 128..640 wide: a full-VRAM reset is not one),
-keeps the tallest (the lowest top on a tie) and treats its rows as the picture. That window is intersected
-with the overscan window the stock formula already applied, and y1/y2 are rescaled so the result fills the
-screen. Half of the extra zoom goes to x, so the distortion is shared between both axes.
+The display handler turns the lines the game programs with GP1 (`Y1` at r22+0x1c, `Y2` at r22+0x20, 0 when
+none) into the picture quad (f7 = top, f4 = bottom, -1..1 is the frame). The stock NTSC block ends with a
+branch to the shared tail at 0x115820; it now jumps here instead. This code
 
-The window is remembered between calls (five words at STATE_VA): it grows at once and shrinks only after
-HOLD consecutive display commands asked for the same smaller one; with no pair the window in use stays.
+  * runs a verbatim copy of that tail, so every register the rest of the handler reads (f1 is the height of
+    the texture span, f3 the width, cr7 the interlace compare) is exactly what the stock code leaves;
+  * then replaces the quad's top and bottom: the video lines 16 to 248 (the active lines 16 to 256
+    minus the 8 last, which games leave black and DuckStation also hides), clipped to the declared range so a game that declares less
+    (Xenogears, lines 26 to 242) has no black lines at the edges, stretched over the whole frame:
+    top = 2*(Y1 - first)/span - 1, bottom = 2*(Y2 - first)/span - 1;
+  * rejoins the tail at 0x1158ac, where the stock code subtracts 1 from f13 to get the bottom.
 
-Nothing changes when the declared height is not 200..256 lines, no pair is found, the top is not in the
-upper half, the bottom is not in the lower half, or the quad is degenerate. Everything it touches is
-saved and restored.
+The result depends only on what the game declares, so nothing adjusts while it runs. Float constants live in
+free TOC slots (16.0, 2.0, 248.0). The first line can be raised by the owner with SELECT + UP / DOWN (cave_dpad.py),
+in steps of 2 lines up to 24, kept in the integer slot at 0x1BE760 (0 after a restart). PAL keeps the stock tail.
 """
 from __future__ import annotations
 
-import struct
-
 from ppcasm import assemble
 
-HOOK_VA, HOOK_STOCK = 0x114148, 0xD0D401AC  # stfs f6,0x1ac(r20)
-RESUME = 0x11414C
-OBJ_TOC = -0x77F8
-FRAME = 0x140
-SAVE_R = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-SAVE_F = [0, 1, 2, 3, 8, 9, 10, 13]
-CONSTS = (-1.0, 1.0, 2.0, 0.5)  # data offsets 0, 4, 8, 12
-STATE_VA = 0x1BE75C  # five free words in the writable data segment: window a, b, candidate a, b, count
-HOLD = 24  # display commands in a row before the window shrinks
+NAME_OFF = -0x1880  # the card name of the game (cave_percard NAME_VA 0x1BE780, "SLUS-00067.VM1") from 0x1c0000
+DELTA, DELTA_END = -0x18A0, -0x1894  # the owner's adjust of the top and of the end (cave_dpad.py), in lines
+# serial -> (lines to start lower, lines to end earlier, width in pixels or None for any), measured on the owner's console
+GAMES = {
+    # Castlevania: Symphony of the Night draws lines 36 to 243 of 16 to 256 while it plays (256 wide); its menus are 384
+    # wide, start at line 256 of the VRAM and use every line
+    "SLUS-00067": (20, 4, 256),
+    "SCUS-94163": (8, 0, None),  # Final Fantasy VII (all three discs share the card of disc 1)
+}
+HOOK_VA = 0x115AE0  # stock: b 0x115820
+RESUME = 0x1158AC  # fsubs f4,f13,f2 (f4 = f13 - 1), then the beq at 0x1158b0
+TOC_FIRST, TOC_TWO, TOC_LAST = -0x55DC, -0x55D8, -0x55D4  # 16.0, 2.0, 248.0
 
 
-def program(data_va: int) -> list[tuple]:
-    hi, lo = (data_va >> 16) & 0xFFFF, data_va & 0xFFFF
-    p: list[tuple] = [("stdu", "r1", -FRAME, "r1")]
-    p += [("std", f"r{r}", 0x80 + 8 * k, "r1") for k, r in enumerate(SAVE_R)]
-    p += [("stfd", f"f{f}", 0xE0 + 8 * j, "r1") for j, f in enumerate(SAVE_F)]
-    p += [  # H = declared lines (Y2 - Y1, or 240 when Y2 is 0)
-        ("lwz", "r9", 0x1C, "r22"), ("lwz", "r10", 0x20, "r22"), ("li", "r11", 240),
-        ("cmpwi", "r10", 0), ("beq", "hok"), ("subf", "r11", "r9", "r10"),
-        ("label", "hok"),
-        ("cmpwi", "r11", 200), ("blt", "done"), ("cmpwi", "r11", 256), ("bgt", "done"),
-        # scan the packet buffer for E3/E4 pairs
-        ("lwz", "r3", OBJ_TOC, "r2"), ("addi", "r3", "r3", 0x60), ("addi", "r4", "r3", 0x17A0),
-        ("li", "r7", -1), ("li", "r9", 0), ("li", "r10", 0),
-        ("label", "loop"),
-        ("lwz", "r5", 0, "r3"), ("rlwinm", "r6", "r5", 8, 24, 31),
-        ("cmpwi", "r6", 0xE3), ("bne", "note3"),
-        ("rlwinm", "r7", "r5", 22, 22, 31), ("rlwinm", "r8", "r5", 0, 22, 31), ("b", "adv"),
-        ("label", "note3"),
-        ("cmpwi", "r6", 0xE4), ("bne", "adv"),
-        ("cmpwi", "r7", 0), ("blt", "adv"),
-        ("rlwinm", "r12", "r5", 22, 22, 31), ("rlwinm", "r0", "r5", 0, 22, 31),
-        ("subf", "r12", "r7", "r12"), ("addi", "r12", "r12", 1),
-        ("subf", "r0", "r8", "r0"),  # x2 - x1 (the width minus one)
-        ("cmpwi", "r12", 100), ("blt", "next"), ("cmpwi", "r12", 256), ("bgt", "next"),
-        ("cmpwi", "r0", 127), ("blt", "next"), ("cmpwi", "r0", 639), ("bgt", "next"),
-        ("cmpw", "r12", "r9"), ("blt", "next"), ("bgt", "take"), ("cmpw", "r7", "r10"), ("bge", "next"),
-        ("label", "take"),
-        ("mr", "r9", "r12"), ("mr", "r10", "r7"),
-        ("label", "next"),
-        ("li", "r7", -1),
-        ("label", "adv"),
-        ("addi", "r3", "r3", 4), ("cmpw", "r3", "r4"), ("blt", "loop"),
-        # r10 = top row, r9 = height (0 when no pair was found), r11 = H
-        ("lis", "r12", (STATE_VA >> 16) & 0xFFFF), ("ori", "r12", "r12", STATE_VA & 0xFFFF),
-        ("lwz", "r5", 0, "r12"), ("lwz", "r6", 4, "r12"),  # the window in use: [a, b)
-        ("cmpwi", "r9", 0), ("beq", "noc"),
-        ("rlwinm", "r0", "r11", 31, 1, 31),  # H / 2
-        ("cmpw", "r10", "r0"), ("bge", "noc"),
-        ("add", "r9", "r10", "r9"), ("cmpw", "r9", "r11"), ("ble", "b1"), ("mr", "r9", "r11"),
-        ("label", "b1"),
-        ("cmpw", "r9", "r0"), ("ble", "noc"),
-        # a usable candidate [r10, r9): it grows the window at once and shrinks it only after HOLD
-        # display commands in a row asked for the same smaller one, so a scene that alternates
-        # areas (or has none for a while) cannot make the picture jump
-        ("cmpwi", "r6", 0), ("bne", "have"), ("li", "r5", 0), ("mr", "r6", "r11"),
-        ("label", "have"),
-        ("subf", "r7", "r10", "r9"), ("subf", "r8", "r5", "r6"), ("cmpw", "r7", "r8"), ("blt", "smaller"),
-        ("mr", "r5", "r10"), ("mr", "r6", "r9"), ("li", "r7", 0), ("b", "keepc"),
-        ("label", "smaller"),
-        ("lwz", "r7", 8, "r12"), ("lwz", "r8", 12, "r12"),
-        ("cmpw", "r7", "r10"), ("bne", "newc"), ("cmpw", "r8", "r9"), ("bne", "newc"),
-        ("lwz", "r7", 16, "r12"), ("addi", "r7", "r7", 1), ("cmpwi", "r7", HOLD), ("blt", "keepc"),
-        ("mr", "r5", "r10"), ("mr", "r6", "r9"), ("li", "r7", 0), ("b", "keepc"),
-        ("label", "newc"),
-        ("stw", "r10", 8, "r12"), ("stw", "r9", 12, "r12"), ("li", "r7", 1),
-        ("label", "keepc"),
-        ("stw", "r7", 16, "r12"), ("stw", "r5", 0, "r12"), ("stw", "r6", 4, "r12"), ("b", "usewin"),
-        ("label", "noc"),
-        ("cmpwi", "r6", 0), ("beq", "done"),  # nothing applied yet: leave the picture alone
-        ("label", "usewin"),
-        # float part
-        ("std", "r5", 0x70, "r1"), ("lfd", "f0", 0x70, "r1"), ("fcfid", "f0", "f0"), ("frsp", "f0", "f0"),
-        ("std", "r6", 0x70, "r1"), ("lfd", "f1", 0x70, "r1"), ("fcfid", "f1", "f1"), ("frsp", "f1", "f1"),
-        ("std", "r11", 0x70, "r1"), ("lfd", "f2", 0x70, "r1"), ("fcfid", "f2", "f2"), ("frsp", "f2", "f2"),
-        ("fdivs", "f0", "f0", "f2"), ("fdivs", "f1", "f1", "f2"),  # a/H, b/H
-        ("lis", "r12", hi), ("ori", "r12", "r12", lo),
-        ("fsubs", "f3", "f4", "f7"),  # y2 - y1
-        ("lfs", "f2", 12, "r12"), ("fcmpu", "f3", "f2"), ("blt", "done"),
-        ("lfs", "f2", 0, "r12"), ("fsubs", "f8", "f2", "f7"), ("fdivs", "f8", "f8", "f3"),  # t at y = -1
-        ("lfs", "f2", 4, "r12"), ("fsubs", "f9", "f2", "f7"), ("fdivs", "f9", "f9", "f3"),  # t at y = +1
-        ("fsubs", "f10", "f0", "f8"), ("fsel", "f0", "f10", "f0", "f8"),  # t0 = max(a/H, t_-1)
-        ("fsubs", "f10", "f9", "f1"), ("fsel", "f1", "f10", "f1", "f9"),  # t1 = min(b/H, t_+1)
-        ("fsubs", "f10", "f1", "f0"),  # t1 - t0
-        ("lfs", "f2", 12, "r12"), ("fcmpu", "f10", "f2"), ("blt", "done"),
-        ("fsubs", "f3", "f9", "f8"), ("fdivs", "f3", "f3", "f10"),  # s = stock window / new window
-        ("fmadds", "f3", "f3", "f2", "f2"),  # zoom of x = (s + 1) / 2
-        ("lfs", "f2", 4, "r12"), ("fsubs", "f2", "f2", "f0"), ("fdivs", "f2", "f2", "f10"),
-        ("lfs", "f13", 8, "r12"), ("fmuls", "f2", "f2", "f13"), ("lfs", "f13", 0, "r12"), ("fadds", "f4", "f13", "f2"),
-        ("fdivs", "f0", "f0", "f10"), ("lfs", "f13", 8, "r12"), ("fmuls", "f0", "f0", "f13"),
-        ("lfs", "f13", 0, "r12"), ("fsubs", "f7", "f13", "f0"),
-        ("fmuls", "f6", "f6", "f3"), ("fmuls", "f5", "f5", "f3"),
-        ("label", "done"),
+def _table() -> list[tuple]:
+    """Leave (top, end) = the game's defaults + the owner's adjust at -0x20(r1) and -0x28(r1); r11 and r12 as before."""
+    ops: list[tuple] = [
+        ("std", "r11", -0x10, "r1"), ("std", "r12", -0x18, "r1"), ("li", "r0", 0),
+        ("std", "r0", -0x20, "r1"), ("std", "r0", -0x28, "r1"), ("lis", "r10", 0x1C),
     ]
-    p += [("lfd", f"f{f}", 0xE0 + 8 * j, "r1") for j, f in enumerate(SAVE_F)]
-    p += [("ld", f"r{r}", 0x80 + 8 * k, "r1") for k, r in enumerate(SAVE_R)]
-    p += [("addi", "r1", "r1", FRAME), ("stfs", "f6", 0x1AC, "r20"), ("b", RESUME)]
-    return p
+    for k, (serial, (top, end, width)) in enumerate(GAMES.items()):
+        name = (serial + ".VM1").encode()
+        for w in range(3):
+            word = int.from_bytes(name[4 * w:4 * w + 4], "big")
+            ops += [("lwz", "r0", NAME_OFF + 4 * w, "r10"), ("lis", "r11", word >> 16), ("ori", "r11", "r11", word & 0xFFFF),
+                    ("cmpw", "r0", "r11"), ("bne", f"g{k}")]
+        if width is not None:  # r22 + 8 is the width the game displays
+            ops += [("lwz", "r0", 8, "r22"), ("cmpwi", "r0", width), ("bne", f"g{k}")]
+        ops += [("li", "r0", top), ("std", "r0", -0x20, "r1"), ("li", "r0", end), ("std", "r0", -0x28, "r1"),
+                ("b", "gdone"), ("label", f"g{k}")]
+    ops += [
+        ("label", "gdone"),
+        ("lwz", "r0", DELTA, "r10"), ("ld", "r11", -0x20, "r1"), ("add", "r11", "r11", "r0"), ("std", "r11", -0x20, "r1"),
+        ("lwz", "r0", DELTA_END, "r10"), ("ld", "r11", -0x28, "r1"), ("add", "r11", "r11", "r0"), ("std", "r11", -0x28, "r1"),
+        ("ld", "r11", -0x10, "r1"), ("ld", "r12", -0x18, "r1"),
+    ]
+    return ops
+
+
+def program() -> list[tuple]:
+    return [
+        # verbatim copy of the shared tail 0x115820..0x1158a8 (the doubling at 0x115894/0x1158a0 stays a fadds)
+        ("lwz", "r0", 0x20, "r22"), ("fsubs", "f12", "f0", "f13"), ("fmr", "f0", "f11"), ("cmpwi", "r0", 0),
+        ("beq", "t1"),
+        ("subf", "r0", "r9", "r0"), ("clrldi", "r0", "r0", 32), ("std", "r0", 0xC0, "r1"),
+        ("lfd", "f10", 0xC0, "r1"), ("fcfid", "f10", "f10"), ("frsp", "f0", "f10"),
+        ("label", "t1"),
+        ("lwz", "r0", 0xC, "r22"), ("fdivs", "f0", "f0", "f11"), ("cmpwi6", "r30", 0),
+        ("std", "r0", 0xC0, "r1"), ("lfd", "f11", 0xC0, "r1"), ("fcfid", "f11", "f11"), ("frsp", "f10", "f11"),
+        ("fmuls", "f1", "f0", "f10"), ("beq6", "t2"), ("fadds", "f12", "f12", "f12"),
+        ("label", "t2"),
+        ("fadds", "f13", "f12", "f1"), ("clrldi", "r0", "r5", 32), ("fadds", "f11", "f8", "f9"), ("cmpwi", "r4", 2),
+        ("std", "r0", 0xC0, "r1"), ("fdivs", "f0", "f12", "f10"), ("lfd", "f3", 0xC0, "r1"), ("fcfid", "f3", "f3"),
+        ("fadds", "f0", "f0", "f0"), ("fdivs", "f13", "f13", "f10"), ("frsp", "f12", "f3"),
+        ("fadds", "f13", "f13", "f13"), ("fsubs", "f7", "f0", "f2"), ("fsubs", "f3", "f12", "f11"),
+        # the quad: f0 = Y1, f10 = Y2 (r9 still holds Y1 for the stock code that follows)
+        *_table(),
+        ("lwz", "r0", 0x20, "r22"), ("cmpwi", "r0", 0), ("bne", "has"), ("addi", "r0", "r9", 240),  # none: 240 lines
+        ("label", "has"),
+        ("std", "r9", 0xC0, "r1"), ("lfd", "f0", 0xC0, "r1"), ("fcfid", "f0", "f0"), ("frsp", "f0", "f0"),
+        ("std", "r0", 0xC0, "r1"), ("lfd", "f10", 0xC0, "r1"), ("fcfid", "f10", "f10"), ("frsp", "f10", "f10"),
+        ("lfd", "f11", -0x20, "r1"), ("fcfid", "f11", "f11"), ("frsp", "f11", "f11"),
+        ("lfs", "f12", TOC_FIRST, "r2"), ("fadds", "f11", "f11", "f12"),  # first = 16 + the lines to start lower
+        ("lfd", "f12", -0x28, "r1"), ("fcfid", "f12", "f12"), ("frsp", "f12", "f12"),
+        ("lfs", "f13", TOC_LAST, "r2"), ("fsubs", "f12", "f13", "f12"),  # last = 248 - the lines to end earlier
+        ("fsubs", "f13", "f0", "f11"), ("fsel", "f13", "f13", "f0", "f11"),  # f13 = max(Y1, 16)
+        ("fsubs", "f4", "f10", "f12"), ("fsel", "f4", "f4", "f12", "f10"),  # f4 = min(Y2, 248)
+        ("fsubs", "f6", "f4", "f13"), ("fsubs", "f7", "f6", "f2"),  # span; span - 1 < 0 means an empty range
+        ("fsel", "f13", "f7", "f13", "f11"), ("fsel", "f4", "f7", "f4", "f12"),  # then the whole window
+        ("fsubs", "f6", "f4", "f13"), ("lfs", "f12", TOC_TWO, "r2"), ("fdivs", "f6", "f12", "f6"),  # f6 = 2 / span
+        ("fsubs", "f7", "f0", "f13"), ("fmuls", "f7", "f7", "f6"), ("fsubs", "f7", "f7", "f2"),  # top
+        ("fsubs", "f13", "f10", "f13"), ("fmuls", "f13", "f13", "f6"),  # bottom + 1, the stock code subtracts the 1
+        ("clrldi", "r0", "r5", 32), ("cmpwi", "r4", 2), ("b", RESUME),
+    ]
 
 
 def build(cave_va: int) -> tuple[list[tuple[int, int, int, str]], int]:
     """Return the (va, old, new, what) patches and the number of bytes used from `cave_va`."""
-    size = 4 * len(assemble(cave_va, program(0)))
-    data_va = cave_va + size
-    words = assemble(cave_va, program(data_va))
-    data = [struct.unpack(">I", struct.pack(">f", c))[0] for c in CONSTS]
+    words = assemble(cave_va, program())
+    stock = assemble(HOOK_VA, [("b", 0x115820)])[0]
     patches = [(cave_va + 4 * i, 0, w, "overscan cave code") for i, w in enumerate(words)]
-    patches += [(data_va + 4 * i, 0, w, "overscan cave data") for i, w in enumerate(data)]
-    patches.append((HOOK_VA, HOOK_STOCK, assemble(HOOK_VA, [("b", cave_va)])[0], "jump to the overscan cave"))
-    return patches, size + 4 * len(data)
+    patches.append((HOOK_VA, stock, assemble(HOOK_VA, [("b", cave_va)])[0], "jump to the overscan cave"))
+    return patches, 4 * len(words)

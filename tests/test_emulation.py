@@ -75,7 +75,7 @@ class Cpu:
 
     def run(self, pc: int, stop: set[int]) -> int:
         """Execute from `pc` until pc lands in `stop`; returns that pc."""
-        for _ in range(60000):
+        for _ in range(900000):
             if pc in stop:
                 return pc
             w = self.code(pc)
@@ -89,6 +89,8 @@ class Cpu:
                 self.r[rt] = self.rd((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 1)
             elif op == 7:  # mulli
                 self.r[rt] = (self.r[ra] * _s16(w & 0xFFFF)) & M64
+            elif op == 44:  # sth
+                self.wr((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 2, self.r[rt] & 0xFFFF)
             elif op == 38:  # stb
                 self.wr((self.ra0(ra) + _s16(w & 0xFFFF)) & M64, 1, self.r[rt] & 0xFF)
             elif op == 40:  # lhz
@@ -107,6 +109,9 @@ class Cpu:
             elif op == 10:  # cmplwi
                 a, b = self.r[ra] & M32, w & 0xFFFF
                 self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
+            elif op == 28:  # andi. (RS in the RT slot, RA is the destination)
+                self.r[ra] = self.r[rt] & (w & 0xFFFF)
+                self.cr[0] = (0, int(self.r[ra] != 0), int(self.r[ra] == 0))
             elif op == 21:  # rlwinm
                 sh, mb, me = rb, (w >> 6) & 31, (w >> 1) & 31
                 x = self.r[rt] & M32
@@ -136,6 +141,8 @@ class Cpu:
                     self.f[rt] = s32(self.f[fa] * self.f[fc])
                 elif op == 59 and xo5 == 29:
                     self.f[rt] = s32(self.f[fa] * self.f[fc] + self.f[fb])
+                elif op == 59 and xo5 == 28:  # fmsubs
+                    self.f[rt] = s32(self.f[fa] * self.f[fc] - self.f[fb])
                 elif op == 63 and xo5 == 23:  # fsel
                     self.f[rt] = self.f[fc] if self.f[fa] >= 0 else self.f[fb]
                 elif op == 63 and xo10 == 0:  # fcmpu
@@ -143,6 +150,8 @@ class Cpu:
                     self.cr[(w >> 23) & 7] = (int(a < b), int(a > b), int(a == b))
                 elif op == 63 and xo10 == 846:  # fcfid
                     self.f[rt] = float(_s64(struct.unpack(">Q", struct.pack(">d", self.f[fb]))[0]))
+                elif op == 63 and xo10 == 72:  # fmr
+                    self.f[rt] = self.f[fb]
                 elif op == 63 and xo10 == 12:  # frsp
                     self.f[rt] = s32(self.f[fb])
                 else:
@@ -355,143 +364,6 @@ def test_every_probe_closes_the_file_it_opened(cave_elf):
     _cpu, _end, _s1, _s2, log = _slots(cave_elf, "Other", "Game", CARD)
     opened = [p for k, p in log if k == "open" and p in CARD]  # attempts at files that do not exist need no close
     assert len(opened) == [k for k, _ in log].count("close") == 2
-
-
-# ---- content-aware overscan cave --------------------------------------------------------------
-
-import cave_overscan as O
-
-OBJ, OUT, STATE = 0x40000000, 0x30000000, 0x31000000
-SOTN = {"x1": -0.8694444, "x2": 0.9013889, "y1": -1.0714286, "y2": 1.0714286}
-
-
-def _e3(x, y):
-    return 0xE3000000 | (y << 10) | x
-
-
-def _e4(x, y):
-    return 0xE4000000 | (y << 10) | x
-
-
-def _reference(q, a, b, h):
-    tw0, tw1 = (-1 - q["y1"]) / (q["y2"] - q["y1"]), (1 - q["y1"]) / (q["y2"] - q["y1"])
-    t0, t1 = max(a / h, tw0), min(b / h, tw1)
-    ln = t1 - t0
-    s = (tw1 - tw0) / ln
-    zx = (s + 1) / 2
-    return {"x1": q["x1"] * zx, "x2": q["x2"] * zx, "y1": -1 - 2 * t0 / ln, "y2": -1 + 2 * (1 - t0) / ln}
-
-
-def _frames(elf, frames, q=SOTN, y1d=16, y2d=256, mem=None):
-    """Run the hook once per entry of `frames` (each a list of packet-buffer words), sharing memory so the
-    remembered window carries over, and return the quad after each call."""
-    mem = {} if mem is None else mem
-    out = []
-    for words in frames:
-        cpu = Cpu(elf)
-        cpu.mem = mem
-        cpu.r[1], cpu.r[2], cpu.r[20], cpu.r[22] = STACK, TOC, OUT, STATE
-        cpu.wr(STATE + 0x1C, 4, y1d)
-        cpu.wr(STATE + 0x20, 4, y2d)
-        cpu.wr(TOC - 0x77F8, 4, OBJ)
-        for k in range(0x17A0 // 4):  # the buffer holds only this frame's words
-            cpu.wr(OBJ + 0x60 + 4 * k, 4, words[k] if k < len(words) else 0)
-        cpu.f[6], cpu.f[5], cpu.f[7], cpu.f[4] = (
-            struct.unpack(">f", struct.pack(">f", v))[0] for v in (q["x1"], q["x2"], q["y1"], q["y2"]))
-        sent_f = {i: 100.5 + i for i in (0, 1, 2, 3, 8, 9, 10, 13)}
-        sent_r = {i: 0x5000 + i for i in (0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)}
-        for i, v in sent_f.items():
-            cpu.f[i] = v
-        for i, v in sent_r.items():
-            cpu.r[i] = v
-        end = cpu.run(O.HOOK_VA, {O.RESUME})
-        assert end == O.RESUME and cpu.r[1] == STACK
-        assert all(cpu.f[i] == v for i, v in sent_f.items()) and all(cpu.r[i] == v for i, v in sent_r.items())
-        assert cpu.rd(OUT + 0x1AC, 4) == struct.unpack(">I", struct.pack(">f", cpu.f[6]))[0]  # displaced store ran
-        out.append({"x1": cpu.f[6], "x2": cpu.f[5], "y1": cpu.f[7], "y2": cpu.f[4]})
-    return out
-
-
-def _overscan(elf, words, q=SOTN, y1d=16, y2d=256):
-    """The quad after the window has settled (O.HOLD identical frames)."""
-    return _frames(elf, [words] * O.HOLD, q=q, y1d=y1d, y2d=y2d)[-1]
-
-
-def _same(a, b, tol=1e-4):
-    return all(abs(a[k] - b[k]) < tol for k in a)
-
-
-def test_castlevania_lines_20_to_226_fill_the_window(cave_elf):
-    words = [_e3(0, 20), _e4(255, 226), 0x2C808080, _e3(256, 20), _e4(511, 226), _e3(0, 0), _e4(1023, 1023)]
-    got = _overscan(cave_elf, words)
-    assert _same(got, _reference(SOTN, 20, 227, 240))
-    assert got["y1"] < SOTN["y1"] and got["y2"] > SOTN["y2"]  # the picture grows past the screen on both sides
-
-
-def test_a_game_that_fills_its_frame_is_left_alone(cave_elf):
-    assert _same(_overscan(cave_elf, [_e3(0, 0), _e4(255, 239)]), SOTN)
-
-
-@pytest.mark.parametrize("words", [[], [_e3(0, 0), _e4(1023, 1023)], [_e3(0, 20)], [_e4(255, 226)], [0x2C808080] * 8])
-def test_no_usable_draw_area_changes_nothing(cave_elf, words):
-    assert _same(_overscan(cave_elf, words), SOTN)
-
-
-@pytest.mark.parametrize("y1d,y2d", [(20, 308), (0, 480), (16, 100)])
-def test_heights_outside_ntsc_240_are_left_alone(cave_elf, y1d, y2d):
-    assert _same(_overscan(cave_elf, [_e3(0, 20), _e4(255, 226)], y1d=y1d, y2d=y2d), SOTN)
-
-
-def test_a_top_in_the_lower_half_is_ignored(cave_elf):
-    assert _same(_overscan(cave_elf, [_e3(0, 150), _e4(255, 250)]), SOTN)
-
-
-def test_the_tallest_area_wins_and_the_bottom_is_clamped(cave_elf):
-    words = [_e3(0, 100), _e4(255, 219), _e3(0, 10), _e4(255, 250)]
-    assert _same(_overscan(cave_elf, words), _reference(SOTN, 10, 240, 240))
-
-
-def test_a_degenerate_quad_is_left_alone(cave_elf):
-    q = {"x1": -0.9, "x2": 0.9, "y1": 0.0, "y2": 0.1}
-    assert _same(_overscan(cave_elf, [_e3(0, 20), _e4(255, 226)], q=q), q)
-
-
-def test_the_stock_overscan_window_is_kept_when_the_game_draws_more(cave_elf):
-    got = _overscan(cave_elf, [_e3(0, 2), _e4(255, 237)])  # rows 2..238: wider than the 8..232 window
-    assert _same(got, SOTN)
-
-
-def test_the_window_shrinks_only_after_hold_frames_in_a_row(cave_elf):
-    words = [_e3(0, 20), _e4(255, 226)]
-    out = _frames(cave_elf, [words] * (O.HOLD + 3))
-    assert all(_same(q, SOTN) for q in out[:O.HOLD - 1])  # still the stock picture
-    assert all(_same(q, _reference(SOTN, 20, 227, 240)) for q in out[O.HOLD - 1:])  # then it stays cropped
-
-
-def test_a_scene_that_alternates_areas_never_flickers(cave_elf):
-    full, game = [_e3(0, 0), _e4(255, 239)], [_e3(0, 20), _e4(255, 226)]
-    out = _frames(cave_elf, [full, game] * 40)
-    assert all(_same(q, SOTN) for q in out)
-
-
-def test_the_window_in_use_stays_when_a_frame_has_no_pair(cave_elf):
-    game = [_e3(0, 20), _e4(255, 226)]
-    out = _frames(cave_elf, [game] * O.HOLD + [[], [_e3(0, 0), _e4(1023, 1023)], []] + [game] * 2)
-    cropped = _reference(SOTN, 20, 227, 240)
-    assert all(_same(q, cropped) for q in out[O.HOLD - 1:])
-
-
-def test_a_larger_area_restores_the_picture_at_once(cave_elf):
-    game, full = [_e3(0, 20), _e4(255, 226)], [_e3(0, 0), _e4(255, 239)]
-    out = _frames(cave_elf, [game] * O.HOLD + [full])
-    assert _same(out[O.HOLD - 1], _reference(SOTN, 20, 227, 240)) and _same(out[-1], SOTN)
-
-
-def test_a_different_smaller_area_needs_its_own_hold(cave_elf):
-    a, b = [_e3(0, 20), _e4(255, 226)], [_e3(0, 40), _e4(255, 200)]
-    out = _frames(cave_elf, [a] * O.HOLD + [b] * (O.HOLD - 1) + [b])
-    assert _same(out[O.HOLD + O.HOLD - 2], _reference(SOTN, 20, 227, 240))  # one short: still window a
-    assert _same(out[-1], _reference(SOTN, 40, 201, 240))
 
 
 # ---- one memory card per game ----------------------------------------------------------------
@@ -792,6 +664,7 @@ def _motors(elf: bytes, small: int, large: int, blocked: int):
     cpu.r[28], cpu.r[30], cpu.r[9] = small, large, 0x55  # r9 is the stock strength curve's result
     cpu.wr(VIB_STRUCT + 0x84, 4, blocked)
     cpu.run(0xEB2D8, {0xEB300})  # 0xeb300 is the bl to cellPadSetActDirect
+    _motors.switch = cpu.rd(VIB_STRUCT + 0x84, 4)
     return cpu.rd(STACK + 0x70, 1), cpu.rd(STACK + 0x71, 1)
 
 
@@ -801,6 +674,13 @@ def test_the_motors_get_what_the_game_commands_even_if_the_stock_flag_blocks(elf
     assert _motors(stock, small, large, blocked=1) == (0, 0)  # the stock code sends nothing while blocked
     assert _motors(patched, small, large, blocked=1) == (small, large)
     assert _motors(patched, small, large, blocked=0) == (small, large)
+
+
+def test_the_emulators_vibration_switch_is_left_on(elfs):
+    """The emulator menu showed vibration as disabled because X+0x84 stayed 1: it is cleared on every update."""
+    _, patched = elfs
+    _motors(patched, 1, 0xFF, blocked=1)
+    assert _motors.switch == 0
 
 
 def test_the_per_game_card_is_registered_as_slot_1_like_the_assign_slots_menu_does(cave_elf):
@@ -821,3 +701,324 @@ def test_the_name_given_to_slot_1_has_the_extension_like_the_one_in_slot_2(cave_
     cpu, _ = _hook(cave_elf, fs, slot2="PS1.VM1")
     assert cpu.cstr(C.NAME_VA) == "SLUS-00662.VM1" and cpu.cstr(cpu.r[27]) == "PS1.VM1"
     assert (CARD_DIR + "SLUS-00662.VM1") in fs.files and (CARD_DIR + "SLUS-00662.VM1.VM1") not in fs.files
+
+
+# ---- the base overscan formula (the NTSC block that feeds the shared code) --------------------
+
+FRAME = 0x32000000
+
+
+def _run_quad(elf, y1d, y2d, height=240, r30=0, r4=1):
+    """Run the formula from the NTSC entry (0x115ac0) to its first branch after y1/y2 and return the Cpu."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, r4, 320, r30
+    cpu.wr(FRAME + 0x1C, 4, y1d)
+    cpu.wr(FRAME + 0x20, 4, y2d)
+    cpu.wr(FRAME + 0xC, 4, height)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+    cpu.run(0x115AC0, {0x1158B0})
+    return cpu
+
+
+def _base_quad(elf, y1d, y2d, height=240):
+    cpu = _run_quad(elf, y1d, y2d, height)
+    return cpu.f[7], cpu.f[4]
+
+
+def _win(y1d, y2d):
+    """Expected quad: the video lines 16..248 clipped to the declared lines and stretched over the frame."""
+    end = y2d or y1d + 240
+    first, last = max(y1d, 16), min(end, 248)
+    if last <= first:
+        first, last = 16, 248
+    k = 2 / (last - first)
+    return k * (y1d - first) - 1, k * (end - first) - 1
+
+
+@pytest.mark.parametrize("y1d,y2d", [
+    (16, 256),  # all 240 lines (Megaman X5): the 8 black last lines of its menu are cropped
+    (16, 0),  # no end line declared: 240 lines
+    (24, 248),  # 224 lines fill the frame
+    (10, 250),  # more than the window: cropped at 16 and 248
+    (26, 242),  # Xenogears: 216 lines fill the frame, no black bands
+    (28, 242),
+    (30, 300),  # more below than the window: cropped at 248
+    (40, 40),  # an empty range falls back to the whole window
+])
+def test_the_quad_shows_the_declared_lines_inside_the_window(elfs, y1d, y2d):
+    _, patched = elfs
+    assert _base_quad(patched, y1d, y2d) == pytest.approx(_win(y1d, y2d), abs=1e-4)
+
+
+@pytest.mark.parametrize("y1d,y2d", [(16, 256), (26, 242), (20, 308), (16, 0)])
+def test_pal_keeps_the_stock_quad(elfs, y1d, y2d):
+    """The PAL block (entry 0x115800) gives the same top and bottom as the unpatched emulator."""
+    stock, patched = elfs
+    out = []
+    for elf in (stock, patched):
+        cpu = Cpu(elf)
+        cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+        cpu.wr(FRAME + 0x1C, 4, y1d)
+        cpu.wr(FRAME + 0x20, 4, y2d)
+        cpu.wr(FRAME + 0xC, 4, 288)
+        cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+        cpu.run(0x115800, {0x1158B0})
+        out.append((cpu.f[7], cpu.f[4], cpu.f[1], cpu.f[3]))
+    assert out[1] == pytest.approx(out[0], abs=1e-6)
+
+
+def test_a_game_declaring_less_than_the_window_fills_the_frame(elfs):
+    _, patched = elfs
+    assert _base_quad(patched, 26, 242) == pytest.approx((-1.0, 1.0), abs=1e-5)
+
+
+@pytest.mark.parametrize("y1d,y2d,height,r30,r4", [
+    (26, 242, 240, 0, 1), (16, 256, 240, 0, 1), (16, 0, 240, 0, 1), (26, 242, 480, 0, 1),
+    (26, 242, 240, 1, 1), (30, 300, 240, 0, 1), (26, 242, 240, 0, 2), (40, 40, 240, 0, 1),
+])
+def test_the_rest_of_the_handler_sees_the_state_the_stock_formula_leaves(elfs, y1d, y2d, height, r30, r4):
+    """The texture span (f1), the width (f3), the compare (cr7) and the registers read later stay as stock.
+
+    The first version of the clipped window overwrote f1 and drew half a picture with glitches on the console.
+    """
+    stock, patched = elfs
+    a, b = _run_quad(stock, y1d, y2d, height, r30, r4), _run_quad(patched, y1d, y2d, height, r30, r4)
+    assert (b.f[1], b.f[3], b.f[2], b.f[8], b.f[9]) == (a.f[1], a.f[3], a.f[2], a.f[8], a.f[9])
+    assert b.cr[7] == a.cr[7]
+    assert (b.r[0], b.r[9], b.r[4], b.r[5], b.r[22], b.r[30]) == (a.r[0], a.r[9], a.r[4], a.r[5], a.r[22], a.r[30])
+
+
+def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):
+    """The overscan is static (DuckStation style): no hook at the display handler's quad store."""
+    _, patched = elfs
+    cpu = Cpu(patched)
+    assert cpu.rd(0x114148, 4) == 0xD0D401AC  # stfs f6,0x1ac(r20), as in the stock image
+
+
+# ---- the left stick as the d-pad in digital mode ----------------------------------------------
+
+import cave_dpad as D
+
+PADS, SRC, REC = 0x42000000, 0x43000000, 0x44000000  # pad array (TOC -0x7ccc), pad data copy (r29), record (r3)
+IDLE = 0xFFFF  # active low: nothing pressed
+
+
+def _dpad(elf, rx=128, ry=128, buttons=IDLE, analog=(0, 0), pad=0, rsx=128):
+    """Run the hook at the button store; return the halfword written to the record (and the end address)."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.r[29], cpu.r[30], cpu.r[0] = STACK, TOC, REC, SRC, pad * 0x94, 0xFFFF0000 | buttons
+    cpu.wr(TOC - 0x7CCC, 4, PADS)
+    for k, flag in enumerate(analog):
+        cpu.wr(PADS + k * D.PAD_STRIDE + D.ANALOG_FLAG, 4, flag)
+    cpu.wr(SRC + 0xC, 2, rsx)
+    cpu.wr(SRC + 0x10, 2, rx)
+    cpu.wr(SRC + 0x12, 2, ry)
+    end = cpu.run(D.HOOK_VA, {D.RESUME})
+    return cpu.rd(REC, 2), end
+
+
+@pytest.mark.parametrize("rx,ry,bit", [(0, 128, 0x8000), (255, 128, 0x2000), (128, 0, 0x1000), (128, 255, 0x4000)])
+def test_the_left_stick_presses_the_matching_dpad_bit_in_digital_mode(cave_elf, rx, ry, bit):
+    got, end = _dpad(cave_elf, rx, ry)
+    assert end == D.RESUME and got == IDLE & ~bit
+
+
+def test_a_diagonal_presses_two_directions(cave_elf):
+    got, _ = _dpad(cave_elf, 10, 250)
+    assert got == IDLE & ~0x8000 & ~0x4000
+
+
+@pytest.mark.parametrize("rx,ry", [(128, 128), (0x40, 0xC0), (0x41, 0xBF), (100, 160)])
+def test_a_stick_at_rest_or_inside_the_dead_zone_changes_nothing(cave_elf, rx, ry):
+    got, _ = _dpad(cave_elf, rx, ry)
+    assert got == IDLE
+
+
+def test_other_buttons_are_kept(cave_elf):
+    pressed_cross = IDLE & ~0x0040
+    got, _ = _dpad(cave_elf, 0, 128, buttons=pressed_cross)
+    assert got == pressed_cross & ~0x8000
+
+
+@pytest.mark.parametrize("pad,analog,expect_changed", [(0, (1, 0), False), (0, (0, 1), True), (1, (0, 1), False), (1, (1, 0), True)])
+def test_analog_mode_of_that_pad_leaves_the_stick_to_the_game(cave_elf, pad, analog, expect_changed):
+    got, _ = _dpad(cave_elf, 0, 128, analog=analog, pad=pad)
+    assert (got != IDLE) is expect_changed
+
+
+def test_the_hook_replaces_only_the_button_store(elfs):
+    stock, patched = elfs
+    assert Cpu(stock).rd(D.HOOK_VA, 4) == D.HOOK_STOCK
+    assert Cpu(patched).rd(D.HOOK_VA, 4) != D.HOOK_STOCK
+
+
+@pytest.mark.parametrize("rsx,bit", [(0, 0x0004), (0x3F, 0x0004), (255, 0x0008), (0xC1, 0x0008)])
+def test_the_right_stick_presses_l1_and_r1_in_digital_mode(cave_elf, rsx, bit):
+    got, end = _dpad(cave_elf, rsx=rsx)
+    assert end == D.RESUME and got == IDLE & ~bit
+
+
+@pytest.mark.parametrize("rsx", [128, 0x40, 0xC0])
+def test_the_right_stick_at_rest_or_in_the_dead_zone_presses_no_shoulder(cave_elf, rsx):
+    assert _dpad(cave_elf, rsx=rsx)[0] == IDLE
+
+
+def test_the_right_stick_does_nothing_in_analog_mode(cave_elf):
+    assert _dpad(cave_elf, rsx=0, analog=(1, 0))[0] == IDLE
+    assert _dpad(cave_elf, rsx=255, analog=(1, 0))[0] == IDLE
+
+
+def test_both_sticks_can_work_together(cave_elf):
+    got, _ = _dpad(cave_elf, rx=0, ry=128, rsx=255)
+    assert got == IDLE & ~0x8000 & ~0x0008
+
+
+# ---- the owner's top adjust: SELECT + UP / DOWN --------------------------------------------------------
+
+ADJ_DELTA, ADJ_PREV_UP, ADJ_PREV_DOWN = 0x1BE760, 0x1BE764, 0x1BE768
+SEL, BTN_UP, BTN_DOWN = 0x0100, 0x1000, 0x4000
+
+
+def _press(cpu_state, buttons, pad=0):
+    """Run the pad hook once with `buttons` (active low) on the memory image in `cpu_state`; return the Cpu."""
+    cpu = cpu_state
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.r[29], cpu.r[30], cpu.r[0] = STACK, TOC, REC, SRC, pad * 0x94, 0xFFFF0000 | buttons
+    cpu.wr(TOC - 0x7CCC, 4, PADS)
+    cpu.wr(SRC + 0xC, 2, 128)
+    cpu.wr(SRC + 0x10, 2, 128)
+    cpu.wr(SRC + 0x12, 2, 128)
+    cpu.run(D.HOOK_VA, {D.RESUME})
+    return cpu
+
+
+def _delta(cpu):
+    return cpu.rd(ADJ_DELTA, 4)
+
+
+def test_select_up_moves_the_first_line_by_two_per_press(cave_elf):
+    cpu = Cpu(cave_elf)
+    for n in (1, 2, 3):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)  # pressed
+        _press(cpu, IDLE)  # released
+        assert _delta(cpu) == 2 * n
+
+
+def test_holding_select_up_counts_one_press_only(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(5):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)
+    assert _delta(cpu) == 2
+
+
+def test_select_down_goes_back_and_stops_at_zero(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(2):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)
+        _press(cpu, IDLE)
+    for _ in range(4):
+        _press(cpu, IDLE & ~SEL & ~BTN_DOWN)
+        _press(cpu, IDLE)
+    assert _delta(cpu) == 0
+
+
+def test_the_adjust_stops_at_the_limit(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(20):
+        _press(cpu, IDLE & ~SEL & ~BTN_UP)
+        _press(cpu, IDLE)
+    assert _delta(cpu) == D.MAX_DELTA
+
+
+@pytest.mark.parametrize("buttons", [IDLE & ~BTN_UP, IDLE & ~BTN_DOWN, IDLE & ~SEL])
+def test_up_down_or_select_alone_change_nothing(cave_elf, buttons):
+    cpu = Cpu(cave_elf)
+    _press(cpu, buttons)
+    _press(cpu, IDLE)
+    assert _delta(cpu) == 0
+
+
+def test_the_adjust_ignores_the_other_pads_and_keeps_the_buttons(cave_elf):
+    cpu = Cpu(cave_elf)
+    _press(cpu, IDLE & ~SEL & ~BTN_UP, pad=1)
+    assert _delta(cpu) == 0
+    cpu.r[11] = 0x1234
+    _press(cpu, IDLE & ~SEL & ~BTN_UP)
+    assert cpu.rd(REC, 2) == IDLE & ~SEL & ~BTN_UP  # the game still sees what was pressed
+    assert cpu.r[11] == 0x1234  # r11 is restored
+
+
+@pytest.mark.parametrize("delta", [0, 2, 8, 24])
+def test_the_quad_starts_the_adjusted_number_of_lines_lower(elfs, delta):
+    _, patched = elfs
+    cpu = Cpu(patched)
+    cpu.wr(ADJ_DELTA, 4, delta)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+    cpu.wr(FRAME + 0x1C, 4, 16)
+    cpu.wr(FRAME + 0x20, 4, 256)
+    cpu.wr(FRAME + 0xC, 4, 240)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+    cpu.run(0x115AC0, {0x1158B0})
+    k = 2 / (248 - (16 + delta))
+    assert (cpu.f[7], cpu.f[4]) == pytest.approx((k * (16 - (16 + delta)) - 1, k * (256 - (16 + delta)) - 1), abs=1e-4)
+
+
+# ---- per-game defaults and the end of the picture ------------------------------------------------------
+
+NAME_VA = 0x1BE780  # the card name cave_percard leaves for the game, "SLUS-00067.VM1"
+ADJ_END = 0x1BE76C
+
+
+def _quad_with(patched, name=b"", top=0, end=0, y1d=16, y2d=256, width=320):
+    cpu = Cpu(patched)
+    cpu.wr(ADJ_DELTA, 4, top)
+    cpu.wr(ADJ_END, 4, end)
+    for i, b in enumerate(name + b"\0"):
+        cpu.wr(NAME_VA + i, 1, b)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+    cpu.wr(FRAME + 0x1C, 4, y1d)
+    cpu.wr(FRAME + 0x20, 4, y2d)
+    cpu.wr(FRAME + 0xC, 4, 240)
+    cpu.wr(FRAME + 0x8, 4, width)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+    cpu.run(0x115AC0, {0x1158B0})
+    return cpu.f[7], cpu.f[4]
+
+
+def _expect(first, last, y1d=16, y2d=256):
+    k = 2 / (last - first)
+    return k * (y1d - first) - 1, k * (y2d - first) - 1
+
+
+@pytest.mark.parametrize("name,first,last", [
+    (b"SCUS-94163.VM1", 24, 248),  # Final Fantasy VII
+    (b"SLUS-00664.VM1", 16, 248),  # Xenogears keeps the default
+    (b"", 16, 248),  # no card name known
+])
+def test_the_known_games_get_their_own_window(elfs, name, first, last):
+    _, patched = elfs
+    assert _quad_with(patched, name) == pytest.approx(_expect(first, last), abs=1e-4)
+
+
+def test_the_owners_adjust_is_added_to_the_games_default(elfs):
+    _, patched = elfs
+    assert _quad_with(patched, b"SCUS-94163.VM1", top=4, end=6) == pytest.approx(_expect(28, 242), abs=1e-4)
+
+
+def test_select_right_and_left_move_the_end(cave_elf):
+    cpu = Cpu(cave_elf)
+    for n in (1, 2, 3):
+        _press(cpu, IDLE & ~SEL & ~0x2000)  # RIGHT
+        _press(cpu, IDLE)
+        assert cpu.rd(ADJ_END, 4) == 2 * n
+    for _ in range(5):
+        _press(cpu, IDLE & ~SEL & ~0x8000)  # LEFT
+        _press(cpu, IDLE)
+    assert cpu.rd(ADJ_END, 4) == 0
+
+
+def test_the_end_adjust_stops_at_its_limit(cave_elf):
+    cpu = Cpu(cave_elf)
+    for _ in range(20):
+        _press(cpu, IDLE & ~SEL & ~0x2000)
+        _press(cpu, IDLE)
+    assert cpu.rd(ADJ_END, 4) == D.MAX_END

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from cave_analog import build as _analog_cave
+from cave_dpad import build as _dpad_cave
 from cave_memcard import build as _memcard_cave
 from cave_overscan import build as _overscan_cave
 from ps3mapi_patch import CODE, CONSTANTS
@@ -34,7 +35,7 @@ EXPECTED_KEY_REVISION = 0x1C
 EMPTY_STORED_BLOCK = b"\x00\x00\x00\xff\xff"  # non-final, zero-length deflate block
 CONTROL_OFF = 0x3A0  # control info; its last block holds the SHA-1 of the whole ELF
 CAVE_VA = 0x1A9380  # first aligned address after the stock text segment (ends 0x1a9368)
-CAVE_SIZE = 0x1000
+CAVE_SIZE = 0x1200
 ELF_DIGEST_OFF = CONTROL_OFF + 0x30 + 0x10 + 0x14  # type-1 block (0x30) + header (0x10) + magic (0x14)
 
 
@@ -49,19 +50,23 @@ class Patch:
 
 
 # Every change lives in ps3mapi_patch (single source of truth).
-OVERSCAN_VA = CAVE_VA + 0x900
-ANALOG_VA = CAVE_VA + 0xE00
+ANALOG_VA = CAVE_VA + 0x1000
+DPAD_VA = CAVE_VA + 0xA00
+OVERSCAN_VA = CAVE_VA + 0xC00
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
-_OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
-assert _MEMCARD_BYTES <= OVERSCAN_VA - CAVE_VA and _OVERSCAN_BYTES <= ANALOG_VA - OVERSCAN_VA
+_DPAD, _DPAD_BYTES = _dpad_cave(DPAD_VA)
+_OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
+assert _MEMCARD_BYTES <= DPAD_VA - CAVE_VA and _DPAD_BYTES <= OVERSCAN_VA - DPAD_VA
+assert _OVERSCAN_BYTES <= ANALOG_VA - OVERSCAN_VA
 assert ANALOG_VA - CAVE_VA + _ANALOG_BYTES <= CAVE_SIZE
 PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
     *(Patch(a, old, new, why) for a, old, new, why in _MEMCARD),
-    *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
     *(Patch(a, old, new, why) for a, old, new, why in _ANALOG),
+    *(Patch(a, old, new, why) for a, old, new, why in _DPAD),
+    *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
 )
 
 
