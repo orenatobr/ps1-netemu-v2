@@ -2,6 +2,11 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `installer/tools/release_notes.sh` prints it and `installer/tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the package and the app show it, the tag is `v<version>`.
 
+## v2.22
+- The repository is public and `main` is protected: every change goes through a pull request with one approving review, which the owner can bypass on a pull request only. The README has a Contributing section.
+- The patch is the same as v2.21 (same patched emulator). The package and its icon carry the new version.
+- Known issue, not fixed here: in Full Screen, games with pre-rendered backgrounds do not fill the frame ([#9](https://github.com/orenatobr/ps1-netemu-v2/issues/9)).
+
 ## v2.21
 - The package icon (the thumbnail in the XMB) showed "v2.00" because it was a fixed PNG. It is now drawn at build time from the `VERSION` file with the same canvas as the app (`installer/tools/icon.sh`), so it always carries the release version.
 - Dithering is removed. The emulator draws the PS1 picture with a software GPU on the SPUs, and it did dither: the draw routines pick one of two tables of 16 vectors by a flag, the 4x4 PS1 matrix of channel offsets (`XBGR_DITHER`) or zeros (`XBGR_NO_DITHER`). The 14 stores that fill the first one with non-zero offsets now store the zero vector, so both tables are the same zeros and no primitive is dithered, whatever the game asks for. The RSX dither switch (`SetDitherEnable`) is also forced to 0. On a modern TV the dither pattern shows as noise on gradients. The SPU part is covered by running the real table initialiser in a small SPU interpreter in the tests; it could not be measured live, because the SPU program is loaded when the emulator starts.
