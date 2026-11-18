@@ -50,7 +50,9 @@ Castlevania and were dropped: analog forced at boot, and analog whenever a game 
 
 Three words in the actuator function (`0xeb2d8..0xeb2e0`) replace the stock chain (an internal block flag at
 `X + 0x84` that the pad thread resets every cycle, and a strength curve built from settings 50 and 51) with a
-direct pass: small motor = what the game sent (on/off), large motor = what it sent (0 to 255).
+direct pass: small motor = what the game sent (on/off), large motor = what it sent (0 to 255). The same words now also
+clear the switch at `X + 0x84` on every update and the pad thread (`0xec000`) no longer sets it, so the emulator's own
+vibration switch stays on.
 
 **This ignores the emulator menu option "Vibration Function".** That option could not be located in memory
 (toggling it changed no setting, pad record or pad state), so vibration is always on for games that ask for it.

@@ -58,9 +58,12 @@ CODE = (
     # vibration: the actuator function (0xeb198) used to send force only through a chain of conditions (the
     # internal block flag at X+0x84 and a strength curve built from settings 50 and 51). The motors now get
     # exactly what the game commands: small motor = r28 (on/off), large motor = r30 (0..255).
-    (0x0EB2D8, 0x801B0084, 0x7F8AE378, "mr r10,r28: small motor as the game asked"),
-    (0x0EB2DC, 0x39600000, 0x7FCBF378, "mr r11,r30: large motor as the game asked"),
-    (0x0EB2E0, 0x2F800000, 0x48000010, "b 0xeb2f0: skip the block flag and the strength curve"),
+    (0x0EB2D8, 0x801B0084, 0x38000000, "li r0,0"),
+    (0x0EB2DC, 0x39600000, 0x901B0084, "stw r0,0x84(r27): the emulator's vibration switch stays on"),
+    (0x0EB2E0, 0x2F800000, 0x7F8AE378, "mr r10,r28: small motor as the game asked"),
+    (0x0EB2E4, 0x409E000C, 0x7FCBF378, "mr r11,r30: large motor as the game asked"),
+    (0x0EB2E8, 0x7D2B4B78, 0x48000008, "b 0xeb2f0: skip the block flag and the strength curve"),
+    (0x0EC000, 0x38000001, 0x38000000, "li r0,0: the pad thread no longer switches vibration off"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (

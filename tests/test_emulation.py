@@ -664,6 +664,7 @@ def _motors(elf: bytes, small: int, large: int, blocked: int):
     cpu.r[28], cpu.r[30], cpu.r[9] = small, large, 0x55  # r9 is the stock strength curve's result
     cpu.wr(VIB_STRUCT + 0x84, 4, blocked)
     cpu.run(0xEB2D8, {0xEB300})  # 0xeb300 is the bl to cellPadSetActDirect
+    _motors.switch = cpu.rd(VIB_STRUCT + 0x84, 4)
     return cpu.rd(STACK + 0x70, 1), cpu.rd(STACK + 0x71, 1)
 
 
@@ -673,6 +674,13 @@ def test_the_motors_get_what_the_game_commands_even_if_the_stock_flag_blocks(elf
     assert _motors(stock, small, large, blocked=1) == (0, 0)  # the stock code sends nothing while blocked
     assert _motors(patched, small, large, blocked=1) == (small, large)
     assert _motors(patched, small, large, blocked=0) == (small, large)
+
+
+def test_the_emulators_vibration_switch_is_left_on(elfs):
+    """The emulator menu showed vibration as disabled because X+0x84 stayed 1: it is cleared on every update."""
+    _, patched = elfs
+    _motors(patched, 1, 0xFF, blocked=1)
+    assert _motors.switch == 0
 
 
 def test_the_per_game_card_is_registered_as_slot_1_like_the_assign_slots_menu_does(cave_elf):
