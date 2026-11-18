@@ -198,12 +198,15 @@ To add a game, hold SELECT and press UP until its bar is gone, count the presses
 in `cave_overscan.py` (the serial is the name of its card in `/dev_hdd0/savedata/vmc`).
 
 
-### 10. Screen mode Normal and Smoothing Disabled, always
+### 10. Setting 49 of the emulator always without its two display bits
 
-The two options of the emulator menu (Settings, Display) live in setting 49 of the emulator: bit 0 picks the second geometry
-path of the display handler (not the one the overscan formula patches) and bit 1 turns the smoothing stages on. Both broke
-the picture the cave builds. `cave_display.py` makes the settings reader (`0xb65f0`) return setting 49 with both bits clear,
-so the emulator always runs in Normal mode without smoothing, whatever the console has saved, and the menu shows it that way.
+Setting 49 of the emulator picks the geometry path of the display handler (bit 0, the second path is not the one the
+overscan formula patches) and turns on extra stages of the picture (bit 1). `cave_display.py` makes the settings reader
+(`0xb65f0`) return it with both bits clear, so the display code always takes the path the overscan formula lives in.
+
+**This does not control the menu options "Screen mode" and "Smoothing" of the emulator menu.** Measured on the console: with
+Smoothing switched on, none of the 61 settings of the emulator (0 to 60) changed, so those two options live outside this
+table, like the vibration option of feature 3 (the system menu keeps them). Keep them at Normal and Disabled in that menu.
 
 ### Tests
 
