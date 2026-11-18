@@ -7,13 +7,14 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 
 | | Feature | In one line |
 |---|---|---|
-| 1 | **Overscan 4:3, DuckStation style** | The picture fills the 4:3 window without black bands, cropped to the area the game really draws. |
+| 1 | **Overscan 4:3, DuckStation style** | A fixed 240-line vertical window: no line is lost and nothing adjusts while a game runs. |
 | 2 | **Automatic analog mode** | Switches on when a game talks DualShock; the pad starts digital and digital-only games stay digital. |
 | 3 | **Vibration** | The motors get exactly what the game commands. |
 | 4 | **One memory card per game** | Named after the game's serial, created blank when missing, shown in slot 1 and registered with the system. |
 | 5 | **Multi-disc games share a card** | Disc 2, 3, ... use the card of disc 1. |
 | 6 | **Slot 2 to slot 1 fallback** | A PS1 card in slot 2 moves to slot 1 when slot 1 has none (PS2 cards never count). |
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
+| 8 | **Right stick as d-pad** | In digital mode the right analog stick presses the d-pad, so digital-only games can use either stick. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
 1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
@@ -22,16 +23,18 @@ in a PowerPC interpreter against the real emulator code).
 
 ### 1. Overscan 4:3, DuckStation style
 
-The stock formula shows a 224-line window (video lines 24 to 248) of the display the game declares. New code
-reads the GPU packet buffer for the game's draw area (`GP0 E3/E4`, which the CPU side never decodes) and crops the
-picture to it, so a game that draws only part of its frame loses its black bands (Castlevania: Symphony of the
-Night draws lines 20 to 226 of 240). Half of the extra zoom goes to the width, so the distortion is shared
-(about 4% each way for that game). The width is the emulator's own: the image stays 4:3 and is not widened.
+DuckStation shows a fixed vertical window and never changes it while a game runs; this does the same. The stock formula
+showed 224 video lines (24 to 248) of the display the game declares, which cut the top and the bottom of games that use
+all 240 lines. The patched formula (`ps3mapi_patch.py`, NTSC block at `0x115ac0` and the shared code up to `0x1158b0`)
+shows the 240 lines from video line 16 (`s = 1.0`, `c1 = 16`): a game that declares 240 lines loses none, a game
+that declares fewer (224 for Final Fantasy VII outside battle) is stretched over the frame, and a game that starts
+after line 16 is anchored to its own first line so no black bar is left on top. The result depends only on the lines
+the game declares (`GP1` display range), never on what it draws, so nothing adjusts while you play. The width is the
+emulator's own: the image stays 4:3. PAL, 480i and the lines above 16 keep the stock behavior.
 
-The window grows at once and shrinks only after 24 display commands in a row ask for the same smaller one, and it
-stays as it is when a frame has no usable area, so scenes that alternate draw areas (an intro) do not make the
-picture jump. PAL, 480i and games without a usable draw area keep the stock behavior. Code: `cave_overscan.py`
-(hook at `0x114148`, window state in five free words at `0x1be75c`).
+A black band the game draws itself (the bottom of Final Fantasy VII battles) stays, as it does in DuckStation. An
+earlier version (v2.08 to v2.13) cropped the picture to the draw area (`GP0 E3/E4`) with a remembered window; it
+adjusted the picture in real time and cut Xenogears and Final Fantasy VII battles, so it was removed.
 
 ### 2. Automatic analog mode
 
@@ -97,6 +100,14 @@ inserted into slot 1 through the emulator's own path at `0xb4124`. A card counts
 one build the patch was made for (SHA-256 `27d4121e...ebdd5d`), restores the original with Triangle, and warns on
 screen when the patch is installed without a backup.
 
+### 8. Right stick as d-pad
+
+The pad thread stores the button halfword (active low) at `0xec16c`, with the PS3 right stick (a halfword per axis,
+128 at rest) in the copy it reads from. The hook jumps to `cave_dpad.py`, which, only while the pad is in digital
+mode (the analog flag the protocol handler tests, `+0x9c` of the pad record), clears the UP / RIGHT / DOWN / LEFT bit
+when the stick passes `0x40` or `0xC0`. In analog mode nothing changes: the game reads the sticks itself. Pads 0 and 1
+are told apart; a multitap pad 2 or 3 reads the flag of pad 1.
+
 ## Install
 
 1. Copy `ps1_netemu_v2.00.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it from the XMB
@@ -119,6 +130,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 
 - Vibration ignores the "Vibration Function" menu option (feature 3).
 - PAL and 480i keep the stock overscan and were not tested.
+- The right stick as d-pad is tested in a PowerPC interpreter against the real emulator code, not yet on a console.
 - The per-game card needs the disc path: it works under webMAN (`last_game.txt`) or when the emulator is given
   `argv[5]`. Another launcher would fall back to feature 6.
 - Multi-disc grouping depends on the `(Disc N)` naming; `CD2` or `Disc2` get one card per disc.
@@ -132,7 +144,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 |---|---|
 | `ps1_netemu_patch.py` | Unpacks the SELF, applies every patch, grows the text segment (`extend_text`), repacks, recomputes the hashes |
 | `ps3mapi_patch.py` | The in-place word patches (`CODE`, `CONSTANTS`) and the live patcher |
-| `cave_overscan.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
+| `cave_dpad.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
 | `ppcasm.py` | Tiny PowerPC assembler with labels, only what the caves use |
 | `tests/` | `test_patch.py` (container), `test_emulation.py` (runs the real emulator code in a PowerPC interpreter) |
 | `installer/` | The PS3 app (PSL1GHT), its tests and the packaging tools |
@@ -148,7 +160,7 @@ whose hashes are stale with error `80010017`).
 The text segment is extended by 4 KB (`p_filesz` and `p_memsz` of program header 0, in the ELF and in the SELF's
 copy); the page was already mapped up to `0x1b0000`, so no address space is added. That space holds the new code.
 The code cave is read-only memory, so state that changes at run time lives in free words of the data segment
-(`0x1be75c` for the overscan window, `0x1be780` for the card name).
+(`0x1be780` for the card name).
 
 The patcher checks the original bytes at every site and refuses anything else.
 

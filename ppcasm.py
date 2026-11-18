@@ -70,8 +70,8 @@ def assemble(base: int, lines: list[tuple]) -> list[int]:
             w = (10 << 26) | (7 << 23) | (_r(a[0]) << 16) | _i16(a[1])
         elif m == "cmpw":
             w = (31 << 26) | (7 << 23) | (_r(a[0]) << 16) | (_r(a[1]) << 11)
-        elif m in ("lbz", "lwz", "stw", "stb"):
-            op = {"lwz": 32, "lbz": 34, "stw": 36, "stb": 38}[m]
+        elif m in ("lbz", "lwz", "stw", "stb", "sth"):
+            op = {"lwz": 32, "lbz": 34, "stw": 36, "stb": 38, "sth": 44}[m]
             w = (op << 26) | (_r(a[0]) << 21) | (_r(a[2]) << 16) | _i16(a[1])
         elif m in ("std", "stdu", "ld"):
             if a[1] % 4:

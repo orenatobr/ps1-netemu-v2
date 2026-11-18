@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from cave_analog import build as _analog_cave
+from cave_dpad import build as _dpad_cave
 from cave_memcard import build as _memcard_cave
 from ps3mapi_patch import CODE, CONSTANTS
 
@@ -49,15 +50,18 @@ class Patch:
 
 # Every change lives in ps3mapi_patch (single source of truth).
 ANALOG_VA = CAVE_VA + 0xE00
+DPAD_VA = CAVE_VA + 0xA00
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
-assert _MEMCARD_BYTES <= ANALOG_VA - CAVE_VA
+_DPAD, _DPAD_BYTES = _dpad_cave(DPAD_VA)
+assert _MEMCARD_BYTES <= DPAD_VA - CAVE_VA and _DPAD_BYTES <= ANALOG_VA - DPAD_VA
 assert ANALOG_VA - CAVE_VA + _ANALOG_BYTES <= CAVE_SIZE
 PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
     *(Patch(a, old, new, why) for a, old, new, why in _MEMCARD),
     *(Patch(a, old, new, why) for a, old, new, why in _ANALOG),
+    *(Patch(a, old, new, why) for a, old, new, why in _DPAD),
 )
 
 
