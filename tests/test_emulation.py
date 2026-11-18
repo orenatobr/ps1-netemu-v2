@@ -742,6 +742,23 @@ def test_the_quad_shows_the_declared_lines_inside_the_window(elfs, y1d, y2d):
     assert _base_quad(patched, y1d, y2d) == pytest.approx(_win(y1d, y2d), abs=1e-4)
 
 
+@pytest.mark.parametrize("y1d,y2d", [(16, 256), (26, 242), (20, 308), (16, 0)])
+def test_pal_keeps_the_stock_quad(elfs, y1d, y2d):
+    """The PAL block (entry 0x115800) gives the same top and bottom as the unpatched emulator."""
+    stock, patched = elfs
+    out = []
+    for elf in (stock, patched):
+        cpu = Cpu(elf)
+        cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, 1, 320, 0
+        cpu.wr(FRAME + 0x1C, 4, y1d)
+        cpu.wr(FRAME + 0x20, 4, y2d)
+        cpu.wr(FRAME + 0xC, 4, 288)
+        cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, -0.88, 0.89
+        cpu.run(0x115800, {0x1158B0})
+        out.append((cpu.f[7], cpu.f[4], cpu.f[1], cpu.f[3]))
+    assert out[1] == pytest.approx(out[0], abs=1e-6)
+
+
 def test_a_game_declaring_less_than_the_window_fills_the_frame(elfs):
     _, patched = elfs
     assert _base_quad(patched, 26, 242) == pytest.approx((-1.0, 1.0), abs=1e-5)
