@@ -303,6 +303,20 @@ reading the RSX video memory (`0xC0xxxxxx`) is not possible through it.
 
 The package app (Triangle), or copy the original back the same way you installed.
 
+## Contributing
+
+`main` is protected: every change goes through a pull request and needs one approving review. The owner can merge a pull
+request without that approval (a bypass limited to pull requests), but nobody can push to `main` directly, delete it or
+force-push it. Run the tests before opening the pull request:
+
+```
+PS1_NETEMU_SELF=<stock ps1_netemu.self> python -m pytest
+installer/tests/run.sh
+```
+
+Bugs and ideas go in the [issues](https://github.com/orenatobr/ps1-netemu-v2/issues). The stock `ps1_netemu.self` is not
+in this repository: you need your own copy from a console (SHA-256 `27d4121e...ebdd5d`).
+
 ## Release
 
 1. Put the new version in `VERSION` and its notes in a `## v<version>` section at the top of `CHANGELOG.md`.
