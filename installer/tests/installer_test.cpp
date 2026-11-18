@@ -87,6 +87,28 @@ void testRefusesUnknownFile() {
     assert(!fs::exists(f.cfg.backup));
 }
 
+void testUpdatesAnOlderPatchWhenTheBackupOfTheOriginalExists() {
+    Fixture f;
+    const Bytes older = bytes("an older patched build");
+    f.put(f.cfg.target, older);
+    f.put(f.cfg.backup, f.stock);
+    assert(installer::detect(f.cfg) == State::Unknown);
+    const auto r = installer::install(f.cfg, f.patched);
+    assert(r.ok && r.code == "installed");
+    assert(f.get(f.cfg.target) == f.patched);
+    assert(f.get(f.cfg.backup) == f.stock);
+}
+
+void testAnUnknownFileWithADamagedBackupIsStillRefused() {
+    Fixture f;
+    const Bytes other = bytes("some other firmware build");
+    f.put(f.cfg.target, other);
+    f.put(f.cfg.backup, bytes("not the original"));
+    const auto r = installer::install(f.cfg, f.patched);
+    assert(!r.ok && r.code == "not_stock");
+    assert(f.get(f.cfg.target) == other);
+}
+
 void testRefusesWrongPayload() {
     Fixture f;
     f.put(f.cfg.target, f.stock);
@@ -121,6 +143,8 @@ int main() {
     testInstallTwiceIsHarmless();
     testRestore();
     testRefusesUnknownFile();
+    testUpdatesAnOlderPatchWhenTheBackupOfTheOriginalExists();
+    testAnUnknownFileWithADamagedBackupIsStillRefused();
     testRefusesWrongPayload();
     testMissingTargetAndMissingBackup();
     testCorruptBackupIsRebuiltFromStockTarget();

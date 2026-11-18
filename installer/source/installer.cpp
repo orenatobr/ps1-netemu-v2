@@ -92,10 +92,13 @@ Outcome install(const Config& cfg, const Bytes& payload) {
     if (!readAll(cfg.target, cur)) return {false, "missing"};
     const std::string sha = sha256(cur);
     if (sha == cfg.patchedSha) return {true, "already"};
-    if (sha != cfg.stockSha) return {false, "not_stock"};
 
     Bytes saved;
-    if (!readAll(cfg.backup, saved) || sha256(saved) != cfg.stockSha) {  // missing or damaged: rebuild it from the live file
+    const bool backupOk = readAll(cfg.backup, saved) && sha256(saved) == cfg.stockSha;
+    // An older patched build is replaced only when the original is safe in the backup (this is how v2.14 updates to
+    // v2.15); any other unknown file is refused.
+    if (sha != cfg.stockSha && !backupOk) return {false, "not_stock"};
+    if (!backupOk) {  // missing or damaged: rebuild it from the live file (which is the stock one here)
         if (!fsx::writeBytes(cfg.backup, cur) || !readAll(cfg.backup, saved) || sha256(saved) != cfg.stockSha)
             return {false, "io_error"};
     }
