@@ -9,7 +9,7 @@
 namespace ui {
 
 struct Text {
-    const char *title, *subtitle, *file, *stock, *patched, *unknown, *missing, *install, *restore, *exit, *triangle;
+    const char *title, *subtitle, *file, *stock, *patched, *unknown, *missing, *install, *restore, *exit;
     const char *installed, *already, *restored, *notStock, *badPayload, *noBackup, *ioError, *noAccess, *patchedNoBackup;
     const char *installing, *restoring, *keepOn;
     const char* stage[6];  ///< One line per installer::Stage, in enum order.

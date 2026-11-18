@@ -12,7 +12,7 @@ namespace ui {
 const Text kEn = {"PS1 emulator patch v" APP_VERSION,
                   "ps1_netemu.self: DuckStation-style vertical overscan (NTSC), 4:3 width unchanged.",
                   "File on the console", "Original (not patched)", "Patched (v" APP_VERSION ")", "Unknown build", "Not found",
-                  "Install the patch", "Restore the original", "Exit", "Triangle",
+                  "Install the patch", "Restore the original", "Exit",
                   "Installed. The original is saved in /dev_hdd0/ps1_netemu_stock.self. Start a PS1 game.",
                   "Already installed.", "Original restored.",
                   "This file is not the build the patch was made for. Nothing was changed.",
@@ -48,6 +48,34 @@ void header(gfx::Canvas& c, const Text& t) {
     }
 }
 
+enum class Button { Cross, Circle, Triangle };
+
+/// A controller face button (dark disc, coloured ring, symbol) centred at cx, cy.
+void buttonIcon(gfx::Canvas& c, Button b, int cx, int cy) {
+    using gfx::Color;
+    const Color tone = b == Button::Cross ? Color{124, 160, 214} : b == Button::Circle ? Color{232, 96, 107} : Color{63, 191, 155};
+    c.circle(cx, cy, 20, gfx::theme::bg);
+    c.ring(cx, cy, 20, 3, tone);
+    switch (b) {
+        case Button::Cross:
+            c.line(cx - 8, cy - 8, cx + 8, cy + 8, 3, tone);
+            c.line(cx - 8, cy + 8, cx + 8, cy - 8, 3, tone);
+            break;
+        case Button::Circle: c.ring(cx, cy, 9, 3, tone); break;
+        case Button::Triangle:
+            c.line(cx, cy - 9, cx - 9, cy + 7, 3, tone);
+            c.line(cx - 9, cy + 7, cx + 9, cy + 7, 3, tone);
+            c.line(cx + 9, cy + 7, cx, cy - 9, 3, tone);
+            break;
+    }
+}
+
+/// Icon followed by its action, with the label's top at y = 668 like the rest of the bar.
+void action(gfx::Canvas& c, Button b, const char* label, int x) {
+    buttonIcon(c, b, x + 20, 681);
+    c.text(label, gfx::Size::Body, gfx::theme::text, x + 56, 668);
+}
+
 }  // namespace
 
 void draw(gfx::Canvas& c, const Text& t, installer::State state, bool mounted, const std::string& note, bool noteOk,
@@ -72,12 +100,12 @@ void draw(gfx::Canvas& c, const Text& t, installer::State state, bool mounted, c
             y += c.lineHeight(Size::Body) + 4;
         }
     }
-    const std::string a = circleConfirms ? "O" : "X";
-    const std::string b = circleConfirms ? "X" : "O";
+    const Button confirm = circleConfirms ? Button::Circle : Button::Cross;
+    const Button back = circleConfirms ? Button::Cross : Button::Circle;
     c.fill(0, 640, 1280, 80, 0, theme::card);
-    c.text(a + "  " + t.install, Size::Body, theme::text, 80, 668);
-    c.text(std::string(t.triangle) + "  " + t.restore, Size::Body, theme::text, 470, 668);
-    c.text(b + "  " + t.exit, Size::Body, theme::text, 1000, 668);
+    action(c, confirm, t.install, 80);
+    action(c, Button::Triangle, t.restore, 470);
+    action(c, back, t.exit, 1000);
 }
 
 void drawProgress(gfx::Canvas& c, const Text& t, bool installing, installer::Stage stage, float fraction) {

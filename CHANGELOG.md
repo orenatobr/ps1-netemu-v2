@@ -6,6 +6,7 @@ Every release lists what changed here, newest first. The section of a version is
 - The app is in English only (the Portuguese texts are gone).
 - The app, the package and the file names carry the real release version instead of "2.00": the app title and "Patched (v...)" line, the package version in the XMB, `ps1_netemu_v<version>.pkg` and `.self`. It comes from the new `VERSION` file at build time.
 - Install and Restore show a progress bar with the stage (checking the package, reading, writing, verifying) and a percentage, and keep redrawing while the flash is written. Before, the screen froze for the whole operation and looked hung. Same patch as v2.15.
+- The bottom bar shows controller button icons (cross, triangle, circle, matching the confirm button of the console) instead of the letters "X", "Triangle" and "O".
 - The changelog is now the source of each release's notes.
 
 ## v2.17
