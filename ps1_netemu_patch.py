@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cave_analog import build as _analog_cave
 from cave_dpad import build as _dpad_cave
 from cave_fullscreen import build as _fullscreen_cave
+from nodither import PATCHES as _NODITHER
 from cave_memcard import build as _memcard_cave
 from cave_overscan import build as _overscan_cave
 from ps3mapi_patch import CODE, CONSTANTS
@@ -72,6 +73,7 @@ PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in _DPAD),
     *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
     *(Patch(a, old, new, why) for a, old, new, why in _FULLSCREEN),
+    *(Patch(a, old, new, why) for a, old, new, why in _NODITHER),
 )
 
 

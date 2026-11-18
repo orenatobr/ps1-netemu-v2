@@ -16,6 +16,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
 | 8 | **Sticks as buttons** | In digital mode the left analog stick presses the d-pad and the right stick presses L1 (left) and R1 (right). |
 | 9 | **Full Screen goes edge to edge** | "Screen Mode: Full Screen" stretches the picture over 100% of the 16:9 width. |
+| 10 | **No dithering** | The ordered dither the PS1 GPU applies to shaded polygons is gone: gradients are smooth on a modern TV. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
 1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
@@ -155,7 +156,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 |---|---|
 | `ps1_netemu_patch.py` | Unpacks the SELF, applies every patch, grows the text segment (`extend_text`), repacks, recomputes the hashes |
 | `ps3mapi_patch.py` | The in-place word patches (`CODE`, `CONSTANTS`) and the live patcher |
-| `cave_dpad.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py`, `cave_fullscreen.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
+| `cave_dpad.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py`, `cave_fullscreen.py`, `nodither.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
 | `ppcasm.py` | Tiny PowerPC assembler with labels, only what the caves use |
 | `tests/` | `test_patch.py` (container), `test_emulation.py` (runs the real emulator code in a PowerPC interpreter) |
 | `installer/` | The PS3 app (PSL1GHT), its tests and the packaging tools |
@@ -219,6 +220,20 @@ An intermediate build (v2.19) used the 1.1001 overscan of the Normal path and le
 stripe on the TV. The factor is a ratio of the frame, so it does not depend on the output resolution (720p or 1080p). It
 acts only when the output is wider than 720, the same test the emulator makes for Normal; SD outputs keep the stock
 picture. Normal never reaches the hook and the vertical ends are not touched.
+
+### 11. No dithering
+
+The PS1 GPU is emulated in software on the SPUs (`gpusoft.cc`, an SPU ELF embedded in the emulator at file offset
+`0x171100`). Its draw routines pick one of two tables of 16 vectors by a flag: `XBGR_DITHER` (SPU `0x15170`, the 4x4 matrix
+of channel offsets of the PS1, eight distinct values from -4 to 3) or `XBGR_NO_DITHER` (`0x15270`, zeros). Both are
+filled once at start by the static initialiser at SPU `0x1018`. `nodither.py` changes the 14 stores that put a non-zero
+offset into `XBGR_DITHER` so they store `$5`, the zero vector the initialiser makes with `il $5,0`: both tables become
+the same zeros and no primitive is dithered. The RSX switch (`SetDitherEnable`, `0x28244`, method `0x0304`, always called
+with a constant) is forced to 0 too; it only matters for targets with fewer than 8 bits per channel.
+
+The tests run the real initialiser in a small SPU interpreter (`tests/test_nodither.py`) and check that after the patch
+`XBGR_DITHER` equals `XBGR_NO_DITHER`, and that no store into the table was missed. It was not measured live: the SPU
+program is loaded when the emulator starts, so the effect shows only after installing the package and reopening a game.
 
 ### 10. Screen mode and Smoothing of the emulator menu: not controllable here
 

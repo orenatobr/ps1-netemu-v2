@@ -39,7 +39,8 @@ APPID		:=	PS1NMPTCH
 CONTENTID	:=	UP0001-$(APPID)_00-0000000000000000
 SFOXML		:=	$(MKROOT)build/sfo.xml
 $(shell mkdir -p $(MKROOT)build && sed 's/@APP_VER@/$(APP_VER)/' $(MKROOT)pkg/sfo.xml > $(SFOXML))
-ICON0		:=	$(MKROOT)pkg/ICON0.PNG
+ICON0		:=	$(MKROOT)build/ICON0.PNG
+$(shell mkdir -p $(MKROOT)build && sh $(MKROOT)tools/icon.sh $(ICON0))
 PKGFILES	:=	
 
 
