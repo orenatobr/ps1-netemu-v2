@@ -14,7 +14,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 5 | **Multi-disc games share a card** | Disc 2, 3, ... use the card of disc 1. |
 | 6 | **Slot 2 to slot 1 fallback** | A PS1 card in slot 2 moves to slot 1 when slot 1 has none (PS2 cards never count). |
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
-| 8 | **Right stick as d-pad** | In digital mode the right analog stick presses the d-pad, so digital-only games can use either stick. |
+| 8 | **Left stick as d-pad** | In digital mode the left analog stick presses the d-pad, so digital-only games can use either stick. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
 1, 2, 3, 4 and the slot 1 display of 4 (the Assign Slots menu shows `SLUS-01041.VM1` in slot 1 and `PS1.VM1` in slot 2).
@@ -100,9 +100,9 @@ inserted into slot 1 through the emulator's own path at `0xb4124`. A card counts
 one build the patch was made for (SHA-256 `27d4121e...ebdd5d`), restores the original with Triangle, and warns on
 screen when the patch is installed without a backup.
 
-### 8. Right stick as d-pad
+### 8. Left stick as d-pad
 
-The pad thread stores the button halfword (active low) at `0xec16c`, with the PS3 right stick (a halfword per axis,
+The pad thread stores the button halfword (active low) at `0xec16c`, with the PS3 left stick (a halfword per axis,
 128 at rest) in the copy it reads from. The hook jumps to `cave_dpad.py`, which, only while the pad is in digital
 mode (the analog flag the protocol handler tests, `+0x9c` of the pad record), clears the UP / RIGHT / DOWN / LEFT bit
 when the stick passes `0x40` or `0xC0`. In analog mode nothing changes: the game reads the sticks itself. Pads 0 and 1
@@ -130,7 +130,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 
 - Vibration ignores the "Vibration Function" menu option (feature 3).
 - PAL and 480i keep the stock overscan and were not tested.
-- The right stick as d-pad is tested in a PowerPC interpreter against the real emulator code, not yet on a console.
+- The left stick as d-pad is tested in a PowerPC interpreter against the real emulator code, not yet on a console.
 - The per-game card needs the disc path: it works under webMAN (`last_game.txt`) or when the emulator is given
   `argv[5]`. Another launcher would fall back to feature 6.
 - Multi-disc grouping depends on the `(Disc N)` naming; `CD2` or `Disc2` get one card per disc.

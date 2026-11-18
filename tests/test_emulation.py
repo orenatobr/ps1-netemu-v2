@@ -732,7 +732,7 @@ def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):
     assert cpu.rd(0x114148, 4) == 0xD0D401AC  # stfs f6,0x1ac(r20), as in the stock image
 
 
-# ---- the right stick as the d-pad in digital mode ----------------------------------------------
+# ---- the left stick as the d-pad in digital mode ----------------------------------------------
 
 import cave_dpad as D
 
@@ -747,14 +747,14 @@ def _dpad(elf, rx=128, ry=128, buttons=IDLE, analog=(0, 0), pad=0):
     cpu.wr(TOC - 0x7CCC, 4, PADS)
     for k, flag in enumerate(analog):
         cpu.wr(PADS + k * D.PAD_STRIDE + D.ANALOG_FLAG, 4, flag)
-    cpu.wr(SRC + 0xC, 2, rx)
-    cpu.wr(SRC + 0xE, 2, ry)
+    cpu.wr(SRC + 0x10, 2, rx)
+    cpu.wr(SRC + 0x12, 2, ry)
     end = cpu.run(D.HOOK_VA, {D.RESUME})
     return cpu.rd(REC, 2), end
 
 
 @pytest.mark.parametrize("rx,ry,bit", [(0, 128, 0x8000), (255, 128, 0x2000), (128, 0, 0x1000), (128, 255, 0x4000)])
-def test_the_right_stick_presses_the_matching_dpad_bit_in_digital_mode(cave_elf, rx, ry, bit):
+def test_the_left_stick_presses_the_matching_dpad_bit_in_digital_mode(cave_elf, rx, ry, bit):
     got, end = _dpad(cave_elf, rx, ry)
     assert end == D.RESUME and got == IDLE & ~bit
 
