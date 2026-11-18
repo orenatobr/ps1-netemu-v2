@@ -28,7 +28,7 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 NTSC_STRETCH = 1.0  # only the stock NTSC prologue still loads it; the quad comes from cave_overscan.py
-OVERSCAN_START, OVERSCAN_END = 16, 256  # the active video lines the quad may show
+OVERSCAN_START, OVERSCAN_END = 16, 248  # the video lines the quad may show: 16 to 248 (the last 8 are overscan)
 PAL_STRETCH = 1.0  # PAL keeps the stock 1:1 window
 
 

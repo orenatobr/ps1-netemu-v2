@@ -24,13 +24,13 @@ in a PowerPC interpreter against the real emulator code).
 ### 1. Overscan 4:3, DuckStation style
 
 DuckStation shows the lines the game declares with `GP1` (`Y1` to `Y2`) filling the frame and never adjusts anything
-while a game runs. Here the quad that shows the picture takes the declared range clipped to the active video lines 16 to
-256 and stretches it over the frame: a game that declares all 240 lines (Megaman X5) loses none, a game that declares
-less (Xenogears, lines 26 to 242) has no black lines at the edges. `cave_overscan.py` runs a verbatim copy of the stock
+while a game runs. Here the quad that shows the picture takes the declared range clipped to the video lines 16 to
+248 and stretches it over the frame (the 8 last active lines are the overscan games leave black, as in the menu of
+Megaman X5, where the picture ends at line 248): a game that declares less (Xenogears, lines 26 to 242) has no black lines at the edges. `cave_overscan.py` runs a verbatim copy of the stock
 formula's tail, so everything the rest of the display handler reads (the texture span in `f1`, the width in `f3`, the
 interlace compare) is exactly what the stock code leaves, and then replaces only the quad's top and bottom:
 `2*(Y1 - first)/span - 1` and `2*(Y2 - first)/span - 1`, where `first` is `max(Y1, 16)` and `span` is
-`min(Y2, 256) - first`. The result depends only on what the game declares, so nothing adjusts while you play. The width
+`min(Y2, 248) - first`. The result depends only on what the game declares, so nothing adjusts while you play. The width
 is the emulator's own: the image stays 4:3. PAL keeps the stock formula.
 
 Two earlier designs were removed. v2.08 to v2.13 cropped the picture to the draw area (`GP0 E3/E4`) with a remembered

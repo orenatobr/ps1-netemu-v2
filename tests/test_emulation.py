@@ -718,27 +718,26 @@ def _base_quad(elf, y1d, y2d, height=240):
 
 
 def _win(y1d, y2d):
-    """Expected quad: the active video lines (16..256, gpu.cpp NTSC_VERTICAL_ACTIVE_*) clipped to the declared
-    lines and stretched over the frame."""
+    """Expected quad: the video lines 16..248 clipped to the declared lines and stretched over the frame."""
     end = y2d or y1d + 240
-    first, last = max(y1d, 16), min(end, 256)
+    first, last = max(y1d, 16), min(end, 248)
     if last <= first:
-        first, last = 16, 256
+        first, last = 16, 248
     k = 2 / (last - first)
     return k * (y1d - first) - 1, k * (end - first) - 1
 
 
 @pytest.mark.parametrize("y1d,y2d", [
-    (16, 256),  # all 240 lines (Megaman X5): nothing is cropped
+    (16, 256),  # all 240 lines (Megaman X5): the 8 black last lines of its menu are cropped
     (16, 0),  # no end line declared: 240 lines
     (24, 248),  # 224 lines fill the frame
-    (10, 250),  # more than the active lines: cropped at 16 and 256
+    (10, 250),  # more than the window: cropped at 16 and 248
     (26, 242),  # Xenogears: 216 lines fill the frame, no black bands
     (28, 242),
-    (30, 300),  # more below than the active lines: cropped at 256
+    (30, 300),  # more below than the window: cropped at 248
     (40, 40),  # an empty range falls back to the whole window
 ])
-def test_the_quad_shows_the_declared_lines_inside_the_active_window(elfs, y1d, y2d):
+def test_the_quad_shows_the_declared_lines_inside_the_window(elfs, y1d, y2d):
     _, patched = elfs
     assert _base_quad(patched, y1d, y2d) == pytest.approx(_win(y1d, y2d), abs=1e-4)
 
