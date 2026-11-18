@@ -1,30 +1,27 @@
 #include "ui.h"
 
+#include <algorithm>
 #include <string>
+
+#ifndef APP_VERSION
+#error "APP_VERSION must be set by the Makefile (the release version, read from the VERSION file)"
+#endif
 
 namespace ui {
 
-const Text kEn = {"PS1 emulator patch v2.00",
+const Text kEn = {"PS1 emulator patch v" APP_VERSION,
                   "ps1_netemu.self: DuckStation-style vertical overscan (NTSC), 4:3 width unchanged.",
-                  "File on the console", "Original (not patched)", "Patched (v2.00)", "Unknown build", "Not found",
+                  "File on the console", "Original (not patched)", "Patched (v" APP_VERSION ")", "Unknown build", "Not found",
                   "Install the patch", "Restore the original", "Exit", "Triangle",
                   "Installed. The original is saved in /dev_hdd0/ps1_netemu_stock.self. Start a PS1 game.",
                   "Already installed.", "Original restored.",
                   "This file is not the build the patch was made for. Nothing was changed.",
                   "The package is damaged. Nothing was changed.", "No backup found. Nothing to restore.",
                   "Write failed. The original was kept; try again.", "Could not open the system files. This needs custom firmware.",
-                  "The patch is installed but there is no backup of the original, so Triangle cannot restore it. Copy the original to /dev_hdd0/ps1_netemu_stock.self."};
-
-const Text kPt = {"Patch do emulador de PS1 v2.00",
-                  "ps1_netemu.self: overscan vertical estilo DuckStation (NTSC), largura 4:3 inalterada.",
-                  "Arquivo no console", "Original (sem patch)", "Com patch (v2.00)", "Versão desconhecida", "Não encontrado",
-                  "Instalar o patch", "Restaurar o original", "Sair", "Triângulo",
-                  "Instalado. O original está salvo em /dev_hdd0/ps1_netemu_stock.self. Abra um jogo de PS1.",
-                  "Já está instalado.", "Original restaurado.",
-                  "Este arquivo não é a versão para a qual o patch foi feito. Nada foi alterado.",
-                  "O pacote está danificado. Nada foi alterado.", "Nenhum backup encontrado. Nada para restaurar.",
-                  "Falha ao gravar. O original foi mantido; tente de novo.", "Não foi possível abrir os arquivos do sistema. Precisa de firmware customizado.",
-                  "O patch está instalado, mas não há backup do original, então Triângulo não consegue restaurar. Copie o original para /dev_hdd0/ps1_netemu_stock.self."};
+                  "The patch is installed but there is no backup of the original, so Triangle cannot restore it. Copy the original to /dev_hdd0/ps1_netemu_stock.self.",
+                  "Installing the patch...", "Restoring the original...", "Do not turn off the console.",
+                  {"Checking the package", "Reading the emulator file", "Checking the backup", "Writing the file",
+                   "Verifying the new file", "Final check"}};
 
 std::string message(const Text& t, const installer::Outcome& o) {
     if (o.code == "installed") return t.installed;
@@ -37,8 +34,9 @@ std::string message(const Text& t, const installer::Outcome& o) {
     return t.ioError;
 }
 
-void draw(gfx::Canvas& c, const Text& t, installer::State state, bool mounted, const std::string& note, bool noteOk,
-          bool circleConfirms) {
+namespace {
+
+void header(gfx::Canvas& c, const Text& t) {
     using namespace gfx;
     c.clear(theme::bg);
     c.checkBadge(112, 112, 34, theme::greenDark, theme::text);
@@ -48,6 +46,14 @@ void draw(gfx::Canvas& c, const Text& t, installer::State state, bool mounted, c
         c.text(line, Size::Body, theme::muted, 80, sy);
         sy += c.lineHeight(Size::Body) + 2;
     }
+}
+
+}  // namespace
+
+void draw(gfx::Canvas& c, const Text& t, installer::State state, bool mounted, const std::string& note, bool noteOk,
+          bool circleConfirms) {
+    using namespace gfx;
+    header(c, t);
     c.card(80, 250, 1120, 130, 18, theme::card, 2, theme::line);
     c.text(t.file, Size::Small, theme::muted, 120, 276);
     const char* label = !mounted ? "-"
@@ -74,5 +80,18 @@ void draw(gfx::Canvas& c, const Text& t, installer::State state, bool mounted, c
     c.text(b + "  " + t.exit, Size::Body, theme::text, 1000, 668);
 }
 
+void drawProgress(gfx::Canvas& c, const Text& t, bool installing, installer::Stage stage, float fraction) {
+    using namespace gfx;
+    header(c, t);
+    const float f = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction;
+    const int barX = 120, barY = 346, barW = 1040, barH = 24;
+    c.card(80, 250, 1120, 130, 18, theme::card, 2, theme::line);
+    c.text(installing ? t.installing : t.restoring, Size::Small, theme::muted, 120, 276);
+    c.text(t.stage[static_cast<int>(stage)], Size::Body, theme::text, 120, 304);
+    c.fill(barX, barY, barW, barH, barH / 2, theme::raised);
+    if (f > 0) c.fill(barX, barY, std::max(barH, static_cast<int>(barW * f)), barH, barH / 2, theme::green);
+    c.text(std::to_string(static_cast<int>(f * 100)) + "%", Size::Large, theme::text, 1160, 276, Align::Right);
+    c.text(t.keepOn, Size::Body, theme::amber, 80, 420);
+}
 
 }  // namespace ui
