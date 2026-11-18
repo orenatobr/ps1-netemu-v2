@@ -31,7 +31,10 @@ formula's tail, so everything the rest of the display handler reads (the texture
 interlace compare) is exactly what the stock code leaves, and then replaces only the quad's top and bottom:
 `2*(Y1 - first)/span - 1` and `2*(Y2 - first)/span - 1`, where `first` is `max(Y1, 16)` and `span` is
 `min(Y2, 248) - first`. The result depends only on what the game declares, so nothing adjusts while you play. The width
-is the emulator's own: the image stays 4:3. PAL keeps the stock formula.
+is the same in every game: the emulator derived the left and right ends of the quad from the horizontal range each game
+declares (GP1), so a game declaring a narrower range (Final Fantasy VII) came out narrower than one declaring the
+nominal range (Megaman X5), measured with tape on the TV. The two ends are now the stock nominal ones, +-640/720 of the 4:3
+window, for every game and every width mode (`0x1158ec`, `0x1158f4`, `0x115b48`). PAL keeps the stock formula.
 
 Two earlier designs were removed. v2.08 to v2.13 cropped the picture to the draw area (`GP0 E3/E4`) with a remembered
 window: it adjusted in real time and cut Xenogears and Final Fantasy VII battles. v2.14 first anchored the picture to

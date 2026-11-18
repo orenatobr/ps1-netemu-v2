@@ -12,7 +12,8 @@ What it does:
     starting at line 16, so a game that uses all of them loses none (a 224 line window
     cut 8 lines at the top and the bottom of Megaman X5). When a game starts its display
     AFTER line 16 the window is anchored to the game's own start, so no black bar is
-    left at the top. 4:3 width is untouched. PAL keeps the stock behavior.
+    left at the top. The picture is the same width in every game (the declared horizontal range no longer
+    changes it). PAL keeps the stock behavior.
 
 Every code site is read first; nothing is written unless the stock words match.
 """
@@ -55,6 +56,12 @@ CODE = (
     # shared tail: the doubling of both quad ends becomes a multiplication by f6 (2 * stretch)
     (0x115894, 0xEC00002A, 0xEC0001B2, "fmuls f0,f0,f6: y1 = 2*s*(Y1-c)/H"),
     (0x1158A0, 0xEDAD682A, 0xEDAD01B2, "fmuls f13,f13,f6: y2 likewise"),
+    # width: the stock quad ends came from the horizontal range each game declares (GP1), so a game that declares
+    # a narrower range (Final Fantasy VII) was drawn narrower than one that declares the nominal range (Megaman X5).
+    # Every game now gets the same ends, +-f10/f11 (640/720 of the 4:3 window, also in the stock 384 mode that used 672/720).
+    (0x1158EC, 0xECAD5824, 0xECAA5824, "fdivs f5,f10,f11: right end = nominal, not the declared range"),
+    (0x1158F4, 0xECC05824, 0xFCC02850, "fneg f6,f5: left end = the mirror of it"),
+    (0x115B48, 0xC1428828, 0xC142881C, "lfs f10,-0x77e4(r2): 640 here too, the stock 384 mode used 672"),
     # vibration: the actuator function (0xeb198) used to send force only through a chain of conditions (the
     # internal block flag at X+0x84 and a strength curve built from settings 50 and 51). The motors now get
     # exactly what the game commands: small motor = r28 (on/off), large motor = r30 (0..255).

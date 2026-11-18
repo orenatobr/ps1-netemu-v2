@@ -152,6 +152,8 @@ class Cpu:
                     self.f[rt] = float(_s64(struct.unpack(">Q", struct.pack(">d", self.f[fb]))[0]))
                 elif op == 63 and xo10 == 72:  # fmr
                     self.f[rt] = self.f[fb]
+                elif op == 63 and xo10 == 40:  # fneg
+                    self.f[rt] = -self.f[fb]
                 elif op == 63 and xo10 == 12:  # frsp
                     self.f[rt] = s32(self.f[fb])
                 else:
@@ -786,6 +788,37 @@ def test_the_rest_of_the_handler_sees_the_state_the_stock_formula_leaves(elfs, y
     assert (b.f[1], b.f[3], b.f[2], b.f[8], b.f[9]) == (a.f[1], a.f[3], a.f[2], a.f[8], a.f[9])
     assert b.cr[7] == a.cr[7]
     assert (b.r[0], b.r[9], b.r[4], b.r[5], b.r[22], b.r[30]) == (a.r[0], a.r[9], a.r[4], a.r[5], a.r[22], a.r[30])
+
+
+def _run_x(elf, f8, f9, r4=1, width=320):
+    """Run the NTSC entry to the end of the horizontal formula (0x1158f8) and return (f5, f6), the quad's x ends."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[22], cpu.r[4], cpu.r[5], cpu.r[30] = STACK, TOC, FRAME, r4, width, 0
+    cpu.wr(FRAME + 0x1C, 4, 16)
+    cpu.wr(FRAME + 0x20, 4, 256)
+    cpu.wr(FRAME + 0xC, 4, 240)
+    cpu.f[2], cpu.f[8], cpu.f[9] = 1.0, f8, f9
+    cpu.run(0x115AC0, {0x1158F8})
+    return cpu.f[5], cpu.f[6]
+
+
+@pytest.mark.parametrize("f8,f9", [
+    (-0.88, 0.89),  # about the nominal range (Megaman X5: -0.8833, 0.8889 on the console)
+    (12.0, -9.0),  # a game that declares a narrower range (Final Fantasy VII): the stock picture was narrower
+    (-6.0, 5.0),  # a wider one
+    (0.0, 0.0),
+])
+@pytest.mark.parametrize("width,r4", [(256, 1), (320, 1), (384, 2), (368, 2)])  # r4 == 2 is the stock 672/720 branch
+def test_every_game_gets_the_same_width_whatever_range_it_declares(elfs, f8, f9, width, r4):
+    """The quad ends are +-640/720 of the 4:3 window; the declared horizontal range does not move them."""
+    _, patched = elfs
+    assert _run_x(patched, f8, f9, r4=r4, width=width) == pytest.approx((640 / 720, -640 / 720), abs=1e-6)
+
+
+def test_the_stock_width_does_follow_the_declared_range(elfs):
+    """Guards the test above: the unpatched emulator gives two different widths for two ranges."""
+    stock, _ = elfs
+    assert _run_x(stock, -0.88, 0.89) != pytest.approx(_run_x(stock, 12.0, -9.0), abs=1e-3)
 
 
 def test_the_picture_quad_is_never_touched_after_the_base_formula(elfs):
