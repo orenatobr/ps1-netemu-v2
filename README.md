@@ -7,7 +7,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 
 | | Feature | In one line |
 |---|---|---|
-| 1 | **Overscan 4:3, DuckStation style** | The fixed DuckStation window (lines 24 to 248) over the frame: nothing adjusts while a game runs. |
+| 1 | **Overscan 4:3, DuckStation style** | The lines the game declares, clipped to 16 to 248 and stretched over the frame: no black bands, nothing adjusts while a game runs. |
 | 2 | **Automatic analog mode** | Switches on when a game talks DualShock; the pad starts digital and digital-only games stay digital. |
 | 3 | **Vibration** | The motors get exactly what the game commands. |
 | 4 | **One memory card per game** | Named after the game's serial, created blank when missing, shown in slot 1 and registered with the system. |
