@@ -16,6 +16,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 7 | **Safe installer** | Backs up the original, verifies every write by hash, refuses unknown builds, restores with one button. |
 | 8 | **Sticks as buttons** | In digital mode the left analog stick presses the d-pad and the right stick presses L1 (left) and R1 (right). |
 | 9 | **Full Screen goes edge to edge** | "Screen Mode: Full Screen" stretches the picture over 100% of the 16:9 width. |
+| 11 | **Parasite Eve: d-pad as left stick in analog mode** | In Parasite Eve (USA, both discs), while the pad is in analog mode the d-pad pushes the left stick all the way, so it walks Aya like the stick. |
 | 10 | **No dithering** | The ordered dither the PS1 GPU applies to shaded polygons is gone: gradients are smooth on a modern TV. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
@@ -119,6 +120,15 @@ mode (the analog flag the protocol handler tests, `+0x9c` of the pad record), cl
 when the stick passes `0x40` or `0xC0`. In analog mode nothing changes: the game reads the sticks itself. Pads 0 and 1
 are told apart; a multitap pad 2 or 3 reads the flag of pad 1.
 
+### 12. Parasite Eve: the d-pad is the left stick in analog mode
+
+The one exception to "in analog mode nothing changes". Parasite Eve (USA) walks Aya with the left stick when the pad
+is in analog mode and ignored the d-pad for that. The same hook (`cave_dpad.py`, `PARASITE_EVE`) compares the card
+name of the game (`0x1be780`, `SLUS-00662.VM1` for disc 1 and `SLUS-00668.VM1` for disc 2) and, only for those, sets
+the left stick halfwords of the pad data copy to 0 (left, up) or 255 (right, down) when the matching d-pad bit is
+pressed, leaving the other axis as it is. The d-pad bits are still sent, so the menus keep working. Any other game, and
+Parasite Eve while the pad is in digital mode, behave as before. Confirmed on the console by the owner.
+
 ## Install
 
 1. Copy `ps1_netemu_v<version>.pkg` to the console (USB drive or `/dev_hdd0/packages`) and install it from the XMB
@@ -156,7 +166,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 |---|---|
 | `ps1_netemu_patch.py` | Unpacks the SELF, applies every patch, grows the text segment (`extend_text`), repacks, recomputes the hashes |
 | `ps3mapi_patch.py` | The in-place word patches (`CODE`, `CONSTANTS`) and the live patcher |
-| `cave_dpad.py`, `cave_analog.py`, `cave_memcard.py`, `cave_percard.py`, `cave_fullscreen.py`, `nodither.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
+| `cave_dpad.py` (also the Parasite Eve d-pad), `cave_analog.py`, `cave_memcard.py`, `cave_percard.py`, `cave_fullscreen.py`, `nodither.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
 | `ppcasm.py` | Tiny PowerPC assembler with labels, only what the caves use |
 | `tests/` | `test_patch.py` (container), `test_emulation.py` (runs the real emulator code in a PowerPC interpreter) |
 | `installer/` | The PS3 app (PSL1GHT), its tests and the packaging tools |
