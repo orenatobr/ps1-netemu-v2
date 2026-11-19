@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from cave_analog import build as _analog_cave
+from cave_cdspeed import build as _cdspeed_cave
 from cave_dpad import build as _dpad_cave
 from cave_fullscreen import build as _fullscreen_cave
 from nodither import PATCHES as _NODITHER
@@ -56,15 +57,18 @@ DPAD_VA = CAVE_VA + 0xA00
 OVERSCAN_VA = CAVE_VA + 0xCC0
 ANALOG_VA = CAVE_VA + 0xF00
 FULLSCREEN_VA = CAVE_VA + 0xF40
+CDSPEED_VA = CAVE_VA + 0x1000
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
 _DPAD, _DPAD_BYTES = _dpad_cave(DPAD_VA)
 _OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
 _FULLSCREEN, _FULLSCREEN_BYTES = _fullscreen_cave(FULLSCREEN_VA)
+_CDSPEED, _CDSPEED_BYTES = _cdspeed_cave(CDSPEED_VA)
 assert _MEMCARD_BYTES <= DPAD_VA - CAVE_VA and _DPAD_BYTES <= OVERSCAN_VA - DPAD_VA
 assert _OVERSCAN_BYTES <= ANALOG_VA - OVERSCAN_VA
 assert ANALOG_VA - CAVE_VA + _ANALOG_BYTES <= FULLSCREEN_VA - CAVE_VA
-assert FULLSCREEN_VA - CAVE_VA + _FULLSCREEN_BYTES <= CAVE_SIZE
+assert _FULLSCREEN_BYTES <= CDSPEED_VA - FULLSCREEN_VA
+assert CDSPEED_VA - CAVE_VA + _CDSPEED_BYTES <= CAVE_SIZE
 PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
@@ -73,6 +77,7 @@ PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in _DPAD),
     *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
     *(Patch(a, old, new, why) for a, old, new, why in _FULLSCREEN),
+    *(Patch(a, old, new, why) for a, old, new, why in _CDSPEED),
     *(Patch(a, old, new, why) for a, old, new, why in _NODITHER),
 )
 

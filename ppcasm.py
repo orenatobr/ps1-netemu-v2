@@ -30,7 +30,7 @@ def _b(disp: int, link: int) -> int:
     return (18 << 26) | (disp & 0x03FFFFFC) | link
 
 
-CONDS = {"beq6": (12, 26), "beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28), "bgt": (12, 29), "ble": (4, 29)}  # cr7
+CONDS = {"bne0": (4, 2), "beq6": (12, 26), "beq": (12, 30), "bne": (4, 30), "blt": (12, 28), "bge": (4, 28), "bgt": (12, 29), "ble": (4, 29)}  # cr7, bne0 is the one branch on cr0 (after andi.)
 
 
 def assemble(base: int, lines: list[tuple]) -> list[int]:

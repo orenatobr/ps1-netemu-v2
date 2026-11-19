@@ -18,6 +18,8 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 9 | **Full Screen goes edge to edge** | "Screen Mode: Full Screen" stretches the picture over 100% of the 16:9 width. |
 | 11 | **Parasite Eve: d-pad as left stick in analog mode** | In Parasite Eve (USA, both discs), while the pad is in analog mode the d-pad pushes the left stick all the way, so it walks Aya like the stick. |
 | 12 | **Full Screen keeps the 3D in place** | In Full Screen the emulator's 3/4 scaling of the X of the geometry is off, so characters stay where they belong on pre-rendered backgrounds. |
+| 13 | **Faster loading from the HD** | Data sectors arrive 4 times faster than a real disc delivers them; FMV voices and CD music keep the pace of the disc. |
+| 14 | **Overclock (live, optional)** | `ps3mapi_patch.py <console> --overclock 1.5` makes the emulated CPU faster in the running game; not installed. |
 | 10 | **No dithering** | The ordered dither the PS1 GPU applies to shaded polygons is gone: gradients are smooth on a modern TV. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
@@ -129,6 +131,29 @@ name of the game (`0x1be780`, `SLUS-00662.VM1` for disc 1 and `SLUS-00668.VM1` f
 the left stick halfwords of the pad data copy to 0 (left, up) or 255 (right, down) when the matching d-pad bit is
 pressed, leaving the other axis as it is. The d-pad bits are still sent, so the menus keep working. Any other game, and
 Parasite Eve while the pad is in digital mode, behave as before. Confirmed on the console by the owner.
+
+### 13. Faster loading from the HD
+
+The emulator hands the game one data sector every 451584 CPU cycles (75 a second, 150 with the double speed bit of the
+CD mode), the pace of a real disc, although the game is read from the hard disk. Each sector is an event scheduled with
+`0x105e68(delay, callback, 0)`, and about a dozen places of the CD code build one of those two delays. The hook is the
+scheduler: `cave_cdspeed.py` divides the delay by 4 when it is exactly one of them and the CD mode (`+0x2734` of the CD
+controller, TOC slot `-0x7c60`) has neither the XA-ADPCM bit (`0x40`) nor the CD-DA bit (`0x01`). A stream that has to
+play at the pace of the disc (an FMV with voices, a CD music track) keeps it. Nothing else changes: the response delays
+of the commands, the timers and the vertical blank are other numbers. Tested in the PowerPC interpreter; the speed up
+was not timed on a console.
+
+### 14. Overclock (live only, optional)
+
+The interpreter loop (`0x106748`) takes `r7` CPU cycles out of the budget of the next event for every MIPS instruction
+(`subf r28,r7,r28` at `0x106798`), and `r7` is 1 (the emulator parameter `0x13` is 0, plus 1: `0x105704`). The
+timers, the video, the CD and the SPU run on the same cycle count, so an instruction that costs less than a cycle is a
+faster CPU with every hardware event in proportion. `cave_overclock.py` keeps the cost in 1/256 of a cycle (free data
+words `0x1be7e0` and `0x1be7e4`) and removes only the whole cycles. It is applied through PS3MAPI into the running
+emulator only: `python ps3mapi_patch.py 192.168.1.85 --overclock 1.5` (1.0 to 4.0, 0.8 s between writes) and
+`--overclock 1.5 --revert`. It is not in the installed package because a game that waits on the CPU can break and the
+PPU has to interpret more instructions in the same time. Tested in the PowerPC interpreter (the cycles taken out per
+instruction, the fraction kept between instructions, the registers the loop still needs), not on a console.
 
 ## Install
 
@@ -284,7 +309,7 @@ tools/preview.sh    # renders the app screens to PNG on the Mac
 `ps3mapi_patch.py` writes the in-place changes (the overscan formulas and the vibration pass) into the running
 emulator through webMAN PS3MAPI. Nothing on the console changes and it is undone when the game closes. It checks the
 stock bytes before writing. The new code of features 1 (content crop), 2, 4, 5 and 6 lives in the text segment
-extension, which only the installed `.self` has.
+extension, which only the installed `.self` has (the CD speedup of feature 13 included).
 
 ```
 python ps3mapi_patch.py 192.168.1.85            # apply, game running
