@@ -6,7 +6,10 @@ SELECT L3 R3 START UP RIGHT DOWN LEFT, then L2 R2 L1 R1 TRIANGLE CIRCLE CROSS SQ
 +0x12, 0..255 with 128 at rest). The hook at 0xec16c jumps here, which
 
   * leaves everything alone when the pad is in analog mode (flag at G + pad * 0xd8 + 0x9c, G from TOC slot
-    -0x7ccc: the same flag the protocol handler tests): the game then reads the sticks itself;
+    -0x7ccc: the same flag the protocol handler tests): the game then reads the sticks itself. The one exception
+    is Parasite Eve (PARASITE_EVE, matched by the card name of the game): there the d-pad pushes the left stick
+    all the way (0 or 255 on its axis, the other axis as it is) while the game is in analog mode, so the d-pad
+    walks Aya like the stick does; the d-pad bits stay as they are for the menus;
   * otherwise clears the UP / RIGHT / DOWN / LEFT bit when the left stick is past 0x40 / 0xC0, and L1 / R1 when
     the right stick X (+0xc) is pushed left / right, so a game with no analog mode (a digital pad only) can be
     steered with the left stick and has both shoulder buttons on the right one;
@@ -21,6 +24,10 @@ from ppcasm import assemble
 HOOK_VA, HOOK_STOCK = 0xEC16C, 0xB0030000  # sth r0,0(r3)
 RESUME = 0xEC170
 PADS_TOC, ANALOG_FLAG, PAD_STRIDE = -0x7CCC, 0x9C, 0xD8
+NAME_OFF = -0x1880  # the card name of the game (cave_percard NAME_VA 0x1BE780, "SLUS-00662.VM1") from 0x1c0000
+# Parasite Eve (USA), discs 1 and 2; disc 2 shares the card of disc 1 when its image is named "(Disc 2)", but the
+# serial of disc 2 is listed too for any other naming
+PARASITE_EVE = ("SLUS-00662", "SLUS-00668")
 LOW, HIGH = 0x40, 0xC0
 # Overscan top adjust: SELECT + UP / DOWN moves the first video line shown by 2 (0 to MAX_DELTA), see cave_overscan.py
 # Offsets from 0x1c0000: the top at 0x1BE760 (+64 and +68 remember the buttons), the end at 0x1BE76C (+70, +74).
@@ -46,6 +53,29 @@ def _adjust(tag: str, mask: int, prev: int, up: bool, slot: int, cap: int) -> li
     ]
 
 
+def _analog_dpad() -> list[tuple]:
+    """Analog mode: for Parasite Eve the d-pad bits in r0 set the left stick halfwords of the pad data copy (r29),
+    which the stock code copies into the record right after the hook; any other game stores the buttons as they are."""
+    ops: list[tuple] = [("label", "analog")]
+    for k, serial in enumerate(PARASITE_EVE):
+        name = (serial + ".VM1").encode()
+        for w in range(3):
+            word = int.from_bytes(name[4 * w:4 * w + 4], "big")
+            ops += [("lis", "r9", 0x1C), ("lwz", "r9", NAME_OFF + 4 * w, "r9"), ("lis", "r10", word >> 16),
+                    ("ori", "r10", "r10", word & 0xFFFF), ("cmpw", "r9", "r10"), ("bne", f"pe{k}")]
+        ops += [("b", "pe")]
+        ops += [("label", f"pe{k}")]
+    ops += [("b", "done"), ("label", "pe")]
+    for axis, low, high in ((0x10, LEFT_BTN, RIGHT_BTN), (0x12, UP_BTN, DOWN_BTN)):
+        ops += [
+            ("lhz", "r9", axis, "r29"),
+            ("andi.", "r10", "r0", low), ("cmpwi", "r10", 0), ("bne", f"a{axis}l"), ("li", "r9", 0), ("label", f"a{axis}l"),
+            ("andi.", "r10", "r0", high), ("cmpwi", "r10", 0), ("bne", f"a{axis}h"), ("li", "r9", 255), ("label", f"a{axis}h"),
+            ("sth", "r9", axis, "r29"),
+        ]
+    return ops + [("b", "done")]
+
+
 def program() -> list[tuple]:
     return [
         ("cmpwi", "r30", 0), ("bne", "noadj"),  # pad 1 only
@@ -57,7 +87,7 @@ def program() -> list[tuple]:
         ("label", "noadj"),
         ("lwz", "r10", PADS_TOC, "r2"), ("cmpwi", "r30", 0), ("beq", "p0"), ("addi", "r10", "r10", PAD_STRIDE),
         ("label", "p0"),
-        ("lwz", "r9", ANALOG_FLAG, "r10"), ("cmpwi", "r9", 0), ("bne", "done"),
+        ("lwz", "r9", ANALOG_FLAG, "r10"), ("cmpwi", "r9", 0), ("bne", "analog"),
         ("lhz", "r9", 0x10, "r29"), ("cmplwi", "r9", LOW), ("bge", "nl"), ("andi.", "r0", "r0", LEFT),
         ("label", "nl"),
         ("cmplwi", "r9", HIGH), ("ble", "nr"), ("andi.", "r0", "r0", RIGHT),
@@ -71,6 +101,7 @@ def program() -> list[tuple]:
         ("cmplwi", "r9", HIGH), ("ble", "done"), ("andi.", "r0", "r0", R1),
         ("label", "done"),
         ("sth", "r0", 0, "r3"), ("b", RESUME),
+        *_analog_dpad(),
     ]
 
 
