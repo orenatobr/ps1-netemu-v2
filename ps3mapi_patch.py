@@ -71,6 +71,15 @@ CODE = (
     (0x0EB2E4, 0x409E000C, 0x7FCBF378, "mr r11,r30: large motor as the game asked"),
     (0x0EB2E8, 0x7D2B4B78, 0x48000008, "b 0xeb2f0: skip the block flag and the strength curve"),
     (0x0EC000, 0x38000001, 0x38000000, "li r0,0: the pad thread no longer switches vibration off"),
+    # Full Screen (issue #9): in the emulator's mode 2 four places of the primitive set-up (entered from 0xc6560, 0xc6904,
+    # 0xc6c64 and 0xc4778) replace an X quantity of the geometry by x/2 + x/4, three quarters of it. The 3D vertices
+    # shrink in X while the pre-rendered background, a texture of the same picture, is stretched by the quad, so a
+    # character lands at a different place than it should (the picture is not scaled the same way). Comparing the
+    # mode with a value it never has sends every mode down the unscaled path, and the quad scales the whole picture.
+    (0x03BE50, 0x2F890002, 0x2F897FFF, "cmpwi cr7,r9,0x7fff: no 3/4 scaling of the X in mode 2 (site 0xc6560)"),
+    (0x03BE64, 0x2F8A0002, 0x2F8A7FFF, "cmpwi cr7,r10,0x7fff: no 3/4 scaling of the X in mode 2 (site 0xc6904)"),
+    (0x03BE78, 0x2F8B0002, 0x2F8B7FFF, "cmpwi cr7,r11,0x7fff: no 3/4 scaling of the X in mode 2 (site 0xc6c64)"),
+    (0x03BFA0, 0x2F890002, 0x2F897FFF, "cmpwi cr7,r9,0x7fff: no 3/4 scaling of the X in mode 2 (site 0xc4778)"),
 )
 # TOC padding slots (zeroed, never referenced by code) used for float constants
 CONSTANTS = (
