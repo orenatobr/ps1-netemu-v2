@@ -19,7 +19,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 11 | **Parasite Eve: d-pad as left stick in analog mode** | In Parasite Eve (USA, both discs), while the pad is in analog mode the d-pad pushes the left stick all the way, so it walks Aya like the stick. |
 | 12 | **Full Screen keeps the 3D in place** | In Full Screen the emulator's 3/4 scaling of the X of the geometry is off, so characters stay where they belong on pre-rendered backgrounds. |
 | 13 | **Faster loading from the HD** | Data sectors arrive 4 times faster than a real disc delivers them; FMV voices and CD music keep the pace of the disc. |
-| 14 | **Overclock (live, optional)** | `ps3mapi_patch.py <console> --overclock 1.5` makes the emulated CPU faster in the running game; not installed. |
+| 14 | **Overclock (off by default)** | SELECT + R1 raises it (1.2x, 1.5x, 2x), SELECT + L1 lowers it; off every time the emulator starts. |
 | 10 | **No dithering** | The ordered dither the PS1 GPU applies to shaded polygons is gone: gradients are smooth on a modern TV. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features
@@ -143,17 +143,18 @@ play at the pace of the disc (an FMV with voices, a CD music track) keeps it. No
 of the commands, the timers and the vertical blank are other numbers. Tested in the PowerPC interpreter; the speed up
 was not timed on a console.
 
-### 14. Overclock (live only, optional)
+### 14. Overclock (off, SELECT + R1 / SELECT + L1)
 
 The interpreter loop (`0x106748`) takes `r7` CPU cycles out of the budget of the next event for every MIPS instruction
 (`subf r28,r7,r28` at `0x106798`), and `r7` is 1 (the emulator parameter `0x13` is 0, plus 1: `0x105704`). The
 timers, the video, the CD and the SPU run on the same cycle count, so an instruction that costs less than a cycle is a
-faster CPU with every hardware event in proportion. `cave_overclock.py` keeps the cost in 1/256 of a cycle (free data
-words `0x1be7e0` and `0x1be7e4`) and removes only the whole cycles. It is applied through PS3MAPI into the running
-emulator only: `python ps3mapi_patch.py 192.168.1.85 --overclock 1.5` (1.0 to 4.0, 0.8 s between writes) and
-`--overclock 1.5 --revert`. It is not in the installed package because a game that waits on the CPU can break and the
-PPU has to interpret more instructions in the same time. Tested in the PowerPC interpreter (the cycles taken out per
-instruction, the fraction kept between instructions, the registers the loop still needs), not on a console.
+faster CPU with every hardware event in proportion. `cave_overclock.py` keeps the cost in 1/256 of a cycle
+(`256 - 21 * level`, free data words `0x1be7e0` for the level and `0x1be7e4` for the fraction) and removes only the
+whole cycles; at level 0 it removes exactly `r7`. The level starts at 0 every time the emulator starts and is moved
+two at a time (0, 2, 4, 6 = off, 1.2x, 1.5x, 2x) by **SELECT + R1** (up) and **SELECT + L1** (down) in the pad hook
+(`cave_dpad.py`, a press moves one step). A game that waits on the CPU can break with it on and the PPU interprets
+more instructions in the same time, so use the lowest step that helps. Tested in the PowerPC interpreter, not timed
+on a console.
 
 ## Install
 
@@ -309,7 +310,7 @@ tools/preview.sh    # renders the app screens to PNG on the Mac
 `ps3mapi_patch.py` writes the in-place changes (the overscan formulas and the vibration pass) into the running
 emulator through webMAN PS3MAPI. Nothing on the console changes and it is undone when the game closes. It checks the
 stock bytes before writing. The new code of features 1 (content crop), 2, 4, 5 and 6 lives in the text segment
-extension, which only the installed `.self` has (the CD speedup of feature 13 included).
+extension, which only the installed `.self` has (the CD speedup of feature 13 and the overclock of feature 14 included).
 
 ```
 python ps3mapi_patch.py 192.168.1.85            # apply, game running
