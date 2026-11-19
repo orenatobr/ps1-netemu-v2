@@ -1258,3 +1258,121 @@ def test_the_end_adjust_stops_at_its_limit(cave_elf):
         _press(cpu, IDLE & ~SEL & ~0x2000)
         _press(cpu, IDLE)
     assert cpu.rd(ADJ_END, 4) == D.MAX_END
+
+
+# ---- CD-ROM: data sectors arrive faster (the loading time of games that run from the HD) ---------------
+
+import cave_cdspeed as CD
+
+CD_STATE = 0x10100000  # fake CD controller state; the TOC slot holds its address
+CD_MODE = 0x2734
+ONE_X, TWO_X = 451584, 225792  # cycles per sector at 75 and 150 sectors a second
+SCHEDULER, SCHEDULER_BODY = 0x105E68, 0x105E6C
+
+
+def _scheduled_delay(elf, delay, mode, mode_known=True):
+    """The delay the scheduler body sees when it is called with `delay` while the CD mode is `mode`."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[3] = STACK, TOC, delay & M32
+    cpu.wr(TOC + CD.CD_STATE_SLOT, 4, CD_STATE)
+    cpu.wr(CD_STATE + CD_MODE, 4, mode)
+    cpu.run(SCHEDULER, {SCHEDULER_BODY})
+    return cpu.r[3] & M32, cpu.r[1]
+
+
+@pytest.mark.parametrize("mode", [0x00, 0x20, 0x80, 0xA0, 0x40, 0x01, 0xC1])
+@pytest.mark.parametrize("delay", [ONE_X, TWO_X, 22579, 564480, 1])
+def test_the_stock_scheduler_keeps_every_delay(elfs, delay, mode):
+    assert _scheduled_delay(elfs[0], delay, mode) == (delay, STACK - 0xB0)
+
+
+@pytest.mark.parametrize("delay", [ONE_X, TWO_X])
+@pytest.mark.parametrize("mode", [0x00, 0x20, 0x80, 0xA0, 0x08, 0x10, 0x04, 0x02, 0x3E])
+def test_data_sectors_arrive_four_times_faster(elfs, delay, mode):
+    assert _scheduled_delay(elfs[1], delay, mode) == (delay // 4, STACK - 0xB0)
+
+
+@pytest.mark.parametrize("delay", [ONE_X, TWO_X])
+@pytest.mark.parametrize("mode", [0x40, 0x60, 0xC0, 0xE0, 0x01, 0x81, 0xC1, 0x41])
+def test_xa_and_cd_da_streams_keep_the_pace_of_the_disc(elfs, delay, mode):
+    assert _scheduled_delay(elfs[1], delay, mode) == (delay, STACK - 0xB0)
+
+
+@pytest.mark.parametrize("delay", [0, 1, 2176, 22579, 225791, 225793, 451583, 451585, 564480, 33868800])
+@pytest.mark.parametrize("mode", [0x00, 0x80])
+def test_any_other_delay_is_left_alone(elfs, delay, mode):
+    assert _scheduled_delay(elfs[1], delay, mode) == (delay, STACK - 0xB0)
+
+
+def test_the_hook_replaces_only_the_first_instruction_of_the_scheduler(elfs):
+    stock, patched = elfs
+    off = P._va_to_off(stock, SCHEDULER)
+    assert patched[off + 4:off + 0x20] == stock[off + 4:off + 0x20]
+    assert patched[off:off + 4] != stock[off:off + 4]
+
+
+# ---- overclock (live only): an instruction costs a fraction of a cycle --------------------------------------
+
+import cave_overclock as OC
+
+OC_CAVE = 0x1A9380 + 0x1100
+
+
+@pytest.fixture(scope="module")
+def overclocked(elfs):
+    stock = elfs[0]
+    patches, _ = OC.build(OC_CAVE)
+    return P.apply_patches(P.extend_text(stock), tuple(P.Patch(a, o, n, w) for a, o, n, w in patches))
+
+
+def _spent(elf, instructions, step, cpi=1):
+    """Cycles taken out of r28 by `instructions` passes through the loop's cost step."""
+    cpu = Cpu(elf)
+    cpu.r[2], cpu.r[7], cpu.r[28] = TOC, cpi, 1_000_000
+    cpu.wr(OC.STEP_VA, 4, step)
+    for _ in range(instructions):
+        cpu.run(OC.HOOK_VA, {OC.RESUME})
+    return 1_000_000 - cpu.r[28]
+
+
+def test_the_stock_loop_costs_a_cycle_per_instruction(elfs):
+    assert _spent(elfs[0], 1000, 0) == 1000
+
+
+@pytest.mark.parametrize("factor,expect", [(1.0, 1000), (1.5, 667), (2.0, 500), (4.0, 250)])
+def test_an_instruction_costs_a_fraction_of_a_cycle(overclocked, factor, expect):
+    assert _spent(overclocked, 1000, OC.step_for(factor)) == pytest.approx(expect, abs=3)
+
+
+def test_the_cost_scales_with_the_cycles_per_instruction_the_emulator_set(overclocked):
+    assert _spent(overclocked, 1000, OC.step_for(2.0), cpi=3) == pytest.approx(1500, abs=3)
+
+
+def test_the_fraction_is_kept_between_instructions(overclocked):
+    cpu = Cpu(overclocked)
+    cpu.r[2], cpu.r[7], cpu.r[28] = TOC, 1, 100
+    cpu.wr(OC.STEP_VA, 4, 171)
+    steps = []
+    for _ in range(6):
+        before = cpu.r[28]
+        cpu.run(OC.HOOK_VA, {OC.RESUME})
+        steps.append(before - cpu.r[28])
+    assert steps == [0, 1, 1, 0, 1, 1] and sum(steps) == 4  # 6 * 171 / 256 = 4.01
+
+
+def test_the_registers_the_loop_still_needs_are_left_alone(overclocked):
+    cpu = Cpu(overclocked)
+    live = {1: 0x7000000, 2: TOC, 7: 1, 23: 0x111, 26: 0x222, 27: 4, 28: 100, 29: 0x333, 31: 0x3F, 5: 0x444, 20: 1, 30: 0x555}
+    for r, v in live.items():
+        cpu.r[r] = v
+    cpu.wr(OC.STEP_VA, 4, 171)
+    cpu.run(OC.HOOK_VA, {OC.RESUME})
+    for r, v in live.items():
+        if r != 28:
+            assert cpu.r[r] == v, r
+
+
+def test_the_overclock_cave_is_not_in_the_installed_package(elfs):
+    stock, patched = elfs
+    off = P._va_to_off(stock, OC.HOOK_VA)
+    assert patched[off:off + 4] == stock[off:off + 4]
