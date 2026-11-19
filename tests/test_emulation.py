@@ -1311,25 +1311,18 @@ def test_the_hook_replaces_only_the_first_instruction_of_the_scheduler(elfs):
     assert patched[off:off + 4] != stock[off:off + 4]
 
 
-# ---- overclock (live only): an instruction costs a fraction of a cycle --------------------------------------
+# ---- overclock: an instruction costs a fraction of a cycle, switched by SELECT + L1 / R1 ---------------
 
 import cave_overclock as OC
 
-OC_CAVE = 0x1A9380 + 0x1100
+BTN_L1, BTN_R1 = 0x0004, 0x0008
 
 
-@pytest.fixture(scope="module")
-def overclocked(elfs):
-    stock = elfs[0]
-    patches, _ = OC.build(OC_CAVE)
-    return P.apply_patches(P.extend_text(stock), tuple(P.Patch(a, o, n, w) for a, o, n, w in patches))
-
-
-def _spent(elf, instructions, step, cpi=1):
-    """Cycles taken out of r28 by `instructions` passes through the loop's cost step."""
+def _spent(elf, instructions, level, cpi=1):
+    """Cycles taken out of r28 by `instructions` passes through the cost step of the loop."""
     cpu = Cpu(elf)
     cpu.r[2], cpu.r[7], cpu.r[28] = TOC, cpi, 1_000_000
-    cpu.wr(OC.STEP_VA, 4, step)
+    cpu.wr(OC.LEVEL_VA, 4, level)
     for _ in range(instructions):
         cpu.run(OC.HOOK_VA, {OC.RESUME})
     return 1_000_000 - cpu.r[28]
@@ -1339,40 +1332,76 @@ def test_the_stock_loop_costs_a_cycle_per_instruction(elfs):
     assert _spent(elfs[0], 1000, 0) == 1000
 
 
-@pytest.mark.parametrize("factor,expect", [(1.0, 1000), (1.5, 667), (2.0, 500), (4.0, 250)])
-def test_an_instruction_costs_a_fraction_of_a_cycle(overclocked, factor, expect):
-    assert _spent(overclocked, 1000, OC.step_for(factor)) == pytest.approx(expect, abs=3)
+@pytest.mark.parametrize("cpi", [1, 2, 3])
+def test_at_level_zero_the_cost_is_exactly_the_stock_one(elfs, cpi):
+    assert _spent(elfs[1], 1000, 0, cpi) == 1000 * cpi
 
 
-def test_the_cost_scales_with_the_cycles_per_instruction_the_emulator_set(overclocked):
-    assert _spent(overclocked, 1000, OC.step_for(2.0), cpi=3) == pytest.approx(1500, abs=3)
+@pytest.mark.parametrize("level,expect", [(2, 836), (4, 672), (6, 508)])
+def test_an_instruction_costs_a_fraction_of_a_cycle(elfs, level, expect):
+    assert _spent(elfs[1], 1000, level) == pytest.approx(expect, abs=3)  # 1.2x, 1.5x and 2x
 
 
-def test_the_fraction_is_kept_between_instructions(overclocked):
-    cpu = Cpu(overclocked)
+def test_the_cost_scales_with_the_cycles_per_instruction_the_emulator_set(elfs):
+    assert _spent(elfs[1], 1000, 6, cpi=3) == pytest.approx(1524, abs=4)
+
+
+def test_the_fraction_is_kept_between_instructions(elfs):
+    cpu = Cpu(elfs[1])
     cpu.r[2], cpu.r[7], cpu.r[28] = TOC, 1, 100
-    cpu.wr(OC.STEP_VA, 4, 171)
+    cpu.wr(OC.LEVEL_VA, 4, 6)  # 130/256 of a cycle each
     steps = []
     for _ in range(6):
         before = cpu.r[28]
         cpu.run(OC.HOOK_VA, {OC.RESUME})
         steps.append(before - cpu.r[28])
-    assert steps == [0, 1, 1, 0, 1, 1] and sum(steps) == 4  # 6 * 171 / 256 = 4.01
+    assert steps == [0, 1, 0, 1, 0, 1] and sum(steps) == 3  # 6 * 130 / 256 = 3.05
 
 
-def test_the_registers_the_loop_still_needs_are_left_alone(overclocked):
-    cpu = Cpu(overclocked)
+@pytest.mark.parametrize("level", [0, 2, 6])
+def test_the_registers_the_loop_still_needs_are_left_alone(elfs, level):
+    cpu = Cpu(elfs[1])
     live = {1: 0x7000000, 2: TOC, 7: 1, 23: 0x111, 26: 0x222, 27: 4, 28: 100, 29: 0x333, 31: 0x3F, 5: 0x444, 20: 1, 30: 0x555}
     for r, v in live.items():
         cpu.r[r] = v
-    cpu.wr(OC.STEP_VA, 4, 171)
+    cpu.wr(OC.LEVEL_VA, 4, level)
     cpu.run(OC.HOOK_VA, {OC.RESUME})
     for r, v in live.items():
         if r != 28:
             assert cpu.r[r] == v, r
 
 
-def test_the_overclock_cave_is_not_in_the_installed_package(elfs):
-    stock, patched = elfs
-    off = P._va_to_off(stock, OC.HOOK_VA)
-    assert patched[off:off + 4] == stock[off:off + 4]
+def _level(cpu):
+    return cpu.rd(OC.LEVEL_VA, 4)
+
+
+def test_select_r1_raises_the_overclock_and_select_l1_lowers_it(elfs):
+    cpu = Cpu(elfs[1])
+    assert _level(cpu) == 0
+    for expect in (2, 4, 6, 6):  # stops at the top
+        _press(cpu, IDLE & ~SEL & ~BTN_R1)
+        _press(cpu, IDLE)
+        assert _level(cpu) == expect
+    for expect in (4, 2, 0, 0):  # and at the bottom
+        _press(cpu, IDLE & ~SEL & ~BTN_L1)
+        _press(cpu, IDLE)
+        assert _level(cpu) == expect
+
+
+def test_holding_select_and_r1_moves_one_step_not_many(elfs):
+    cpu = Cpu(elfs[1])
+    for _ in range(5):
+        _press(cpu, IDLE & ~SEL & ~BTN_R1)
+    assert _level(cpu) == 2
+
+
+@pytest.mark.parametrize("buttons", [IDLE & ~BTN_R1, IDLE & ~BTN_L1, IDLE & ~BTN_R1 & ~BTN_L1])
+def test_the_shoulder_buttons_alone_do_not_change_the_overclock(elfs, buttons):
+    cpu = Cpu(elfs[1])
+    _press(cpu, buttons)
+    _press(cpu, IDLE)
+    assert _level(cpu) == 0
+
+
+def test_the_overclock_starts_off(elfs):
+    assert Cpu(elfs[1]).rd(OC.LEVEL_VA, 4) == 0

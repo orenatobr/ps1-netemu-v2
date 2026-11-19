@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cave_analog import build as _analog_cave
 from cave_cdspeed import build as _cdspeed_cave
 from cave_dpad import build as _dpad_cave
+from cave_overclock import build as _overclock_cave
 from cave_fullscreen import build as _fullscreen_cave
 from nodither import PATCHES as _NODITHER
 from cave_memcard import build as _memcard_cave
@@ -54,21 +55,24 @@ class Patch:
 
 # Every change lives in ps3mapi_patch (single source of truth).
 DPAD_VA = CAVE_VA + 0xA00
-OVERSCAN_VA = CAVE_VA + 0xCC0
-ANALOG_VA = CAVE_VA + 0xF00
-FULLSCREEN_VA = CAVE_VA + 0xF40
-CDSPEED_VA = CAVE_VA + 0x1000
+OVERSCAN_VA = CAVE_VA + 0xD60
+ANALOG_VA = CAVE_VA + 0xF80
+FULLSCREEN_VA = CAVE_VA + 0xFC0
+CDSPEED_VA = CAVE_VA + 0x1040
+OVERCLOCK_VA = CAVE_VA + 0x10A0
 _MEMCARD, _MEMCARD_BYTES = _memcard_cave(CAVE_VA)
 _ANALOG, _ANALOG_BYTES = _analog_cave(ANALOG_VA)
 _DPAD, _DPAD_BYTES = _dpad_cave(DPAD_VA)
 _OVERSCAN, _OVERSCAN_BYTES = _overscan_cave(OVERSCAN_VA)
 _FULLSCREEN, _FULLSCREEN_BYTES = _fullscreen_cave(FULLSCREEN_VA)
 _CDSPEED, _CDSPEED_BYTES = _cdspeed_cave(CDSPEED_VA)
+_OVERCLOCK, _OVERCLOCK_BYTES = _overclock_cave(OVERCLOCK_VA)
 assert _MEMCARD_BYTES <= DPAD_VA - CAVE_VA and _DPAD_BYTES <= OVERSCAN_VA - DPAD_VA
 assert _OVERSCAN_BYTES <= ANALOG_VA - OVERSCAN_VA
 assert ANALOG_VA - CAVE_VA + _ANALOG_BYTES <= FULLSCREEN_VA - CAVE_VA
 assert _FULLSCREEN_BYTES <= CDSPEED_VA - FULLSCREEN_VA
-assert CDSPEED_VA - CAVE_VA + _CDSPEED_BYTES <= CAVE_SIZE
+assert _CDSPEED_BYTES <= OVERCLOCK_VA - CDSPEED_VA
+assert OVERCLOCK_VA - CAVE_VA + _OVERCLOCK_BYTES <= CAVE_SIZE
 PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in CODE),
     *(Patch(a, 0, value, "float constant in a free TOC slot") for a, value in CONSTANTS),
@@ -78,6 +82,7 @@ PATCHES = (
     *(Patch(a, old, new, why) for a, old, new, why in _OVERSCAN),
     *(Patch(a, old, new, why) for a, old, new, why in _FULLSCREEN),
     *(Patch(a, old, new, why) for a, old, new, why in _CDSPEED),
+    *(Patch(a, old, new, why) for a, old, new, why in _OVERCLOCK),
     *(Patch(a, old, new, why) for a, old, new, why in _NODITHER),
 )
 

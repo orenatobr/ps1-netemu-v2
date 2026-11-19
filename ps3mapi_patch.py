@@ -6,8 +6,6 @@ ps1_emu.self but runs ps1_netemu code), then:
     python ps3mapi_patch.py 192.168.1.85            # apply
     python ps3mapi_patch.py 192.168.1.85 --revert   # restore
     python ps3mapi_patch.py 192.168.1.85 --watch    # keep running; patch every game you start
-    python ps3mapi_patch.py 192.168.1.85 --overclock 1.5          # emulated CPU 1.5x faster (live only)
-    python ps3mapi_patch.py 192.168.1.85 --overclock 1.5 --revert
 
 What it does:
   * vertical "overscan" (NTSC): the picture is shown in a window of 240 video lines
@@ -27,8 +25,6 @@ import re
 import struct
 import time
 import urllib.request
-
-import cave_overclock
 
 logger = logging.getLogger(__name__)
 
@@ -135,32 +131,6 @@ def apply(host: str, revert: bool = False) -> None:
         logger.info("0x%x <- %08x  %s", addr, new, why)
 
 
-OVERCLOCK_CAVE = 0x1A9380 + 0x1100  # in the text segment extension of the running emulator, after the CD speedup cave
-PAUSE = 0.8  # seconds between two requests: bursts make webMAN drop out
-
-
-def overclock(host: str, factor: float, revert: bool = False) -> None:
-    """Make the emulated R3000 `factor` times faster in the running emulator (cave_overclock.py), or undo it."""
-    pid = find_process(host)
-    patches, _ = cave_overclock.build(OVERCLOCK_CAVE)
-    hook = next(p for p in patches if p[0] == cave_overclock.HOOK_VA)
-    found = read_word(host, pid, hook[0])
-    if revert:
-        write_word(host, pid, hook[0], hook[1])
-        logger.info("overclock removed")
-        return
-    if found != hook[1]:
-        raise RuntimeError(f"0x{hook[0]:x}: expected {hook[1]:08x}, found {found:08x}; not patching")
-    for addr, _, new, _ in (p for p in patches if p[0] != hook[0]):
-        time.sleep(PAUSE)
-        write_word(host, pid, addr, new)
-    time.sleep(PAUSE)
-    write_word(host, pid, cave_overclock.STEP_VA, cave_overclock.step_for(factor))  # the cost, before the hook is live
-    time.sleep(PAUSE)
-    write_word(host, pid, hook[0], hook[2])
-    logger.info("overclock %.2fx on (step %d/256 cycle per instruction)", factor, cave_overclock.step_for(factor))
-
-
 def watch(host: str, interval: float = 2.0) -> None:
     """Patch each PS1 game as soon as it starts (a fresh process has the stock words)."""
     logger.info("watching %s; start a PS1 game (Ctrl-C to stop)", host)
@@ -181,12 +151,9 @@ if __name__ == "__main__":
     ap.add_argument("host")
     ap.add_argument("--revert", action="store_true")
     ap.add_argument("--watch", action="store_true", help="patch every game that starts")
-    ap.add_argument("--overclock", type=float, metavar="FACTOR", help="run the emulated CPU FACTOR (1.0 to 4.0) times faster, live only")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    if args.overclock:
-        overclock(args.host, args.overclock, args.revert)
-    elif args.watch:
+    if args.watch:
         watch(args.host)
     else:
         apply(args.host, args.revert)

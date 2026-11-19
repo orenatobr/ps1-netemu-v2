@@ -33,6 +33,9 @@ LOW, HIGH = 0x40, 0xC0
 # Offsets from 0x1c0000: the top at 0x1BE760 (+64 and +68 remember the buttons), the end at 0x1BE76C (+70, +74).
 DELTA, PREV_UP, PREV_DOWN, MAX_DELTA = -0x18A0, -0x189C, -0x1898, 24
 DELTA_END, PREV_LEFT, PREV_RIGHT, MAX_END = -0x1894, -0x1890, -0x188C, 16
+# Overclock level: SELECT + R1 / SELECT + L1 move it by 2 (0 to MAX_LEVEL), see cave_overclock.py
+LEVEL, PREV_R1, PREV_L1, MAX_LEVEL = -0x1820, -0x1818, -0x1814, 6
+L1_BTN, R1_BTN = 0x0004, 0x0008
 SELECT, UP_BTN, DOWN_BTN, LEFT_BTN, RIGHT_BTN = 0x0100, 0x1000, 0x4000, 0x8000, 0x2000  # active low: bit set = not pressed
 LEFT, RIGHT, UP, DOWN = 0x7FFF, 0xDFFF, 0xEFFF, 0xBFFF  # the button bit cleared = pressed (active low)
 L1, R1 = 0xFFFB, 0xFFF7  # bits 2 and 3 of the second byte
@@ -83,6 +86,7 @@ def program() -> list[tuple]:
         *_adjust("u", UP_BTN, PREV_UP, True, DELTA, MAX_DELTA), *_adjust("d", DOWN_BTN, PREV_DOWN, False, DELTA, MAX_DELTA),
         *_adjust("r", RIGHT_BTN, PREV_RIGHT, True, DELTA_END, MAX_END),
         *_adjust("l", LEFT_BTN, PREV_LEFT, False, DELTA_END, MAX_END),
+        *_adjust("o", R1_BTN, PREV_R1, True, LEVEL, MAX_LEVEL), *_adjust("p", L1_BTN, PREV_L1, False, LEVEL, MAX_LEVEL),
         ("ld", "r11", -0x10, "r1"),
         ("label", "noadj"),
         ("lwz", "r10", PADS_TOC, "r2"), ("cmpwi", "r30", 0), ("beq", "p0"), ("addi", "r10", "r10", PAD_STRIDE),
