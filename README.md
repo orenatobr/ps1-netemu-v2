@@ -17,6 +17,7 @@ A patched `ps1_netemu.self` (the PS3's PS1 emulator) and an installer package fo
 | 8 | **Sticks as buttons** | In digital mode the left analog stick presses the d-pad and the right stick presses L1 (left) and R1 (right). |
 | 9 | **Full Screen goes edge to edge** | "Screen Mode: Full Screen" stretches the picture over 100% of the 16:9 width. |
 | 11 | **Parasite Eve: d-pad as left stick in analog mode** | In Parasite Eve (USA, both discs), while the pad is in analog mode the d-pad pushes the left stick all the way, so it walks Aya like the stick. |
+| 12 | **Full Screen keeps the 3D in place** | In Full Screen the emulator's 3/4 scaling of the X of the geometry is off, so characters stay where they belong on pre-rendered backgrounds. |
 | 10 | **No dithering** | The ordered dither the PS1 GPU applies to shaded polygons is gone: gradients are smooth on a modern TV. |
 
 Confirmed on a console (Castlevania: Symphony of the Night and Chrono Cross, NTSC, webMAN MOD 1.47.48): features

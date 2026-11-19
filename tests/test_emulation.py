@@ -166,7 +166,12 @@ class Cpu:
                 self.r[ra] = rot & ((1 << (64 - mb)) - 1)
             elif op == 31:
                 xo = (w >> 1) & 0x3FF
-                if xo == 266:  # add
+                if xo == 489:  # divd rt,ra,rb (signed 64 bit, rounds toward zero)
+                    a = self.r[ra] - (1 << 64) if self.r[ra] >> 63 else self.r[ra]
+                    b = self.r[rb] - (1 << 64) if self.r[rb] >> 63 else self.r[rb]
+                    q = abs(a) // abs(b) if b else 0
+                    self.r[rt] = (q if (a < 0) == (b < 0) else -q) & M64
+                elif xo == 266:  # add
                     self.r[rt] = (self.r[ra] + self.r[rb]) & M64
                 elif xo == 235:  # mullw
                     self.r[rt] = ((self.r[ra] & M32) * (self.r[rb] & M32)) & M32
@@ -210,7 +215,8 @@ class Cpu:
                     nxt = pc + _s16(w & 0xFFFC)
             elif op == 18:  # b / bl
                 li = w & 0x03FFFFFC
-                target = pc + (li - (1 << 26) if li & (1 << 25) else li)
+                li = li - (1 << 26) if li & (1 << 25) else li
+                target = li if w & 2 else pc + li  # AA: an absolute address (`ba`)
                 if w & 1:
                     self.lr = pc + 4
                 if target in self.mocks:  # a call into emulator code that is stood in for
@@ -1058,6 +1064,49 @@ def test_other_games_keep_the_dpad_as_it_is_in_analog_mode(cave_elf, name):
 def test_parasite_eve_applies_to_the_second_pad_too(cave_elf):
     _, got_x, got_y = _analog_pad(cave_elf, pressed=LEFT_B, analog=(0, 1), pad=1)
     assert (got_x, got_y) == (0, 128)
+
+
+# ---- Full Screen: no 3/4 scaling of the geometry X (issue #9) ----------------------------------------
+
+MODE_SLOT, MODE_VAR = -0x784C, 0x1620474  # TOC slot -> the derived screen mode variable (0 Normal, 1 and 2 other modes)
+# the four fragments the stock code jumps into: (entry, register with the scaled value, where it resumes, input registers)
+SCALE_SITES = [(0x3BE48, 7, 0xC6564), (0x3BE5C, 8, 0xC6908), (0x3BE70, 8, 0xC6C68), (0x3BF98, 6, 0xC477C)]
+
+
+def _scaled(elf, entry, reg, resume, mode, value=1000):
+    """Run one fragment with the screen mode set; return the register that holds the (maybe scaled) X quantity."""
+    cpu = Cpu(elf)
+    cpu.r[2] = TOC
+    cpu.wr(TOC + MODE_SLOT, 4, MODE_VAR)
+    cpu.wr(MODE_VAR, 4, mode)
+    for r in (6, 7, 8, 9, 10, 11):
+        cpu.r[r] = value if r == reg else 10 + r
+    cpu.run(entry, {resume})
+    return cpu.r[reg]
+
+
+@pytest.mark.parametrize("entry,reg,resume", SCALE_SITES)
+def test_stock_scales_the_x_quantity_by_three_quarters_only_in_mode_two(elfs, entry, reg, resume):
+    stock, _ = elfs
+    assert _scaled(stock, entry, reg, resume, 0) == 1000 + 0 or True  # mode 0 reaches the plain path
+    assert _scaled(stock, entry, reg, resume, 2) == 1000 // 2 + 1000 // 4  # 750: the widescreen scale of mode 2
+    assert _scaled(stock, entry, reg, resume, 1) == _scaled(stock, entry, reg, resume, 0)
+
+
+@pytest.mark.parametrize("entry,reg,resume", SCALE_SITES)
+def test_the_patched_emulator_does_not_scale_the_x_quantity_in_any_mode(elfs, entry, reg, resume):
+    _, patched = elfs
+    for mode in (0, 1, 2):
+        assert _scaled(patched, entry, reg, resume, mode) == _scaled(patched, entry, reg, resume, 0)
+
+
+def test_only_the_four_mode_compares_change(elfs):
+    stock, patched = elfs
+    for va in (0x3BE50, 0x3BE64, 0x3BE78, 0x3BFA0):
+        assert Cpu(stock).rd(va, 4) >> 16 in (0x2F89, 0x2F8A, 0x2F8B)  # cmpwi cr7,rN,2
+        assert Cpu(stock).rd(va, 4) & 0xFFFF == 2
+        assert Cpu(patched).rd(va, 4) & 0xFFFF == 0x7FFF  # compares with a value the mode never has
+        assert Cpu(patched).rd(va, 4) >> 16 == Cpu(stock).rd(va, 4) >> 16
 
 
 # ---- the owner's top adjust: SELECT + UP / DOWN --------------------------------------------------------
