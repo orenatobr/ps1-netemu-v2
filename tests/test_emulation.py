@@ -999,6 +999,67 @@ def test_both_sticks_can_work_together(cave_elf):
     assert got == IDLE & ~0x8000 & ~0x0008
 
 
+# ---- Parasite Eve: in analog mode the d-pad does what the left stick does ------------------------
+
+NAME_VA = 0x1BE780  # the per-game card name (cave_percard), "SLUS-00662.VM1"
+STORES_DONE = 0xEC190  # the stock code after the hook copies the sticks into the record, then loops
+UP_B, DOWN_B, LEFT_B, RIGHT_B = 0x1000, 0x4000, 0x8000, 0x2000
+
+
+def _analog_pad(elf, name="SLUS-00662.VM1", pressed=0, lx=128, ly=128, analog=(1, 0), pad=0):
+    """Run the hook and the stock stick copy; return (buttons halfword, record LX, record LY)."""
+    cpu = Cpu(elf)
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.r[29], cpu.r[30], cpu.r[0] = STACK, TOC, REC, SRC, pad * 0x94, 0xFFFF0000 | (IDLE & ~pressed)
+    cpu.wr(TOC - 0x7CCC, 4, PADS)
+    for k, flag in enumerate(analog):
+        cpu.wr(PADS + k * D.PAD_STRIDE + D.ANALOG_FLAG, 4, flag)
+    for i, b in enumerate(name.encode() + b"\0"):
+        cpu.mem[NAME_VA + i] = b
+    cpu.wr(SRC + 0xC, 2, 128)
+    cpu.wr(SRC + 0xE, 2, 128)
+    cpu.wr(SRC + 0x10, 2, lx)
+    cpu.wr(SRC + 0x12, 2, ly)
+    cpu.run(D.HOOK_VA, {STORES_DONE})
+    return cpu.rd(REC, 2), cpu.rd(REC + 2, 1), cpu.rd(REC + 3, 1)
+
+
+@pytest.mark.parametrize("pressed,lx,ly", [(LEFT_B, 0, 128), (RIGHT_B, 255, 128), (UP_B, 128, 0), (DOWN_B, 128, 255)])
+@pytest.mark.parametrize("name", ["SLUS-00662.VM1", "SLUS-00668.VM1"])
+def test_parasite_eve_dpad_pushes_the_left_stick_in_analog_mode(cave_elf, name, pressed, lx, ly):
+    buttons, got_x, got_y = _analog_pad(cave_elf, name=name, pressed=pressed)
+    assert (got_x, got_y) == (lx, ly)
+    assert buttons == IDLE & ~pressed  # the d-pad bit itself is still there for the menus
+
+
+def test_parasite_eve_diagonal_pushes_both_axes(cave_elf):
+    _, got_x, got_y = _analog_pad(cave_elf, pressed=LEFT_B | DOWN_B)
+    assert (got_x, got_y) == (0, 255)
+
+
+def test_parasite_eve_real_stick_still_works_and_dpad_wins_on_its_axis(cave_elf):
+    _, got_x, got_y = _analog_pad(cave_elf, lx=30, ly=200)  # nothing on the d-pad: the stick as it is
+    assert (got_x, got_y) == (30, 200)
+    _, got_x, got_y = _analog_pad(cave_elf, pressed=RIGHT_B, lx=30, ly=200)  # d-pad right overrides X only
+    assert (got_x, got_y) == (255, 200)
+
+
+def test_parasite_eve_dpad_is_not_remapped_for_the_pad_in_digital_mode(cave_elf):
+    _, got_x, got_y = _analog_pad(cave_elf, pressed=LEFT_B, analog=(0, 0))
+    assert (got_x, got_y) == (128, 128)  # digital: the stick drives the d-pad, never the other way
+
+
+@pytest.mark.parametrize("name", ["SLUS-00067.VM1", "SCUS-94163.VM1", "SLUS-01041.VM1", "SLUS-00663.VM1", ""])
+def test_other_games_keep_the_dpad_as_it_is_in_analog_mode(cave_elf, name):
+    for pressed in (LEFT_B, RIGHT_B, UP_B, DOWN_B):
+        buttons, got_x, got_y = _analog_pad(cave_elf, name=name, pressed=pressed)
+        assert (buttons, got_x, got_y) == (IDLE & ~pressed, 128, 128)
+
+
+def test_parasite_eve_applies_to_the_second_pad_too(cave_elf):
+    _, got_x, got_y = _analog_pad(cave_elf, pressed=LEFT_B, analog=(0, 1), pad=1)
+    assert (got_x, got_y) == (0, 128)
+
+
 # ---- the owner's top adjust: SELECT + UP / DOWN --------------------------------------------------------
 
 ADJ_DELTA, ADJ_PREV_UP, ADJ_PREV_DOWN = 0x1BE760, 0x1BE764, 0x1BE768

@@ -2,6 +2,11 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `installer/tools/release_notes.sh` prints it and `installer/tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the package and the app show it, the tag is `v<version>`.
 
+## v2.23
+- Parasite Eve (USA, discs 1 and 2): in analog mode the d-pad now does what the left analog stick does. The game walks Aya with the stick in that mode and ignored the d-pad. The d-pad bits set the left stick to 0 or 255 on their axis (the other axis as it is) and are still sent, so the menus work. Only this game, matched by its card name (`SLUS-00662`, `SLUS-00668`); every other game and the digital mode are unchanged. Confirmed on the console.
+- The d-pad code grew, so the overscan, analog and full screen caves moved up inside the same extended text segment (no change in what they do).
+- Issue #9 (Full Screen with pre-rendered backgrounds) is not fixed in this release.
+
 ## v2.22
 - The repository is public and `main` is protected: every change goes through a pull request with one approving review, which the owner can bypass on a pull request only. The README has a Contributing section.
 - The patch is the same as v2.21 (same patched emulator). The package and its icon carry the new version.
