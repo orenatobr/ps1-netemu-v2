@@ -3,8 +3,10 @@
 #include <sys/file.h>
 
 #include <string>
+#include <vector>
 
 #include "gfx.h"
+#include "discfix.h"
 #include "fsx.h"
 #include "installer.h"
 #include "ps3.h"
@@ -21,6 +23,7 @@ namespace {
 constexpr const char* kStockSha = "27d4121ecf8dddf83fa7f0117a454254bd6626c6f17e3412cdd9e24aa7ebdd5d";
 constexpr const char* kTarget = "/dev_blind/ps1emu/ps1_netemu.self";
 constexpr const char* kBackup = "/dev_hdd0/ps1_netemu_stock.self";
+constexpr const char* kDiscs = "/dev_hdd0/PSXISO";
 
 }  // namespace
 
@@ -42,6 +45,17 @@ int main() {
     installer::State state = mounted ? installer::detect(cfg) : installer::State::Missing;
     if (!mounted) note = t.noAccess;
     else if (state == installer::State::Patched && !fsx::exists(kBackup)) note = t.patchedNoBackup;
+
+    // A disc image whose root directory is hidden (Legend of Mana) cannot be mounted: clear the flag, one sector each.
+    const std::vector<std::string> repaired = discfix::fixDirectory(kDiscs);
+    if (!repaired.empty()) {
+        std::string list;
+        for (std::size_t i = 0; i < repaired.size() && i < 3; ++i) list += (i ? ", " : " ") + repaired[i];
+        if (repaired.size() > 3) list += " +" + std::to_string(repaired.size() - 3);
+        const bool hadNote = !note.empty();
+        note += std::string(hadNote ? " " : "") + t.discsFixed + list;
+        if (!hadNote) noteOk = true;
+    }
 
     // Redraws the progress screen whenever the percentage or the stage changes (install and restore take a while:
     // the flash is slow and the hashing runs on the CPU, so without this the screen looked frozen).

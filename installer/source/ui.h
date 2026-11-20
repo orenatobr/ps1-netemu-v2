@@ -11,6 +11,7 @@ namespace ui {
 struct Text {
     const char *title, *subtitle, *file, *stock, *patched, *unknown, *missing, *install, *restore, *exit;
     const char *installed, *already, *restored, *notStock, *badPayload, *noBackup, *ioError, *noAccess, *patchedNoBackup;
+    const char* discsFixed;  ///< Prefix of the note listing the disc images whose hidden root directory was repaired.
     const char *installing, *restoring, *keepOn;
     const char* stage[6];  ///< One line per installer::Stage, in enum order.
 };
