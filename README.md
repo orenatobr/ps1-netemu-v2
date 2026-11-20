@@ -134,14 +134,16 @@ Parasite Eve while the pad is in digital mode, behave as before. Confirmed on th
 
 ### 13. Faster loading from the HD
 
-The emulator hands the game one data sector every 451584 CPU cycles (75 a second, 150 with the double speed bit of the
-CD mode), the pace of a real disc, although the game is read from the hard disk. Each sector is an event scheduled with
-`0x105e68(delay, callback, 0)`, and about a dozen places of the CD code build one of those two delays. The hook is the
-scheduler: `cave_cdspeed.py` divides the delay by 4 when it is exactly one of them and the CD mode (`+0x2734` of the CD
-controller, TOC slot `-0x7c60`) has neither the XA-ADPCM bit (`0x40`) nor the CD-DA bit (`0x01`). A stream that has to
-play at the pace of the disc (an FMV with voices, a CD music track) keeps it. Nothing else changes: the response delays
-of the commands, the timers and the vertical blank are other numbers. Tested in the PowerPC interpreter; the speed up
-was not timed on a console.
+The emulator times the CD controller with a tick of 225792 CPU cycles (150 a second): `0x105e68(delay, callback, 0)`
+with the callback in the TOC slot `-0x7bf8` (code at `0xdec48`). The handler counts the sectors and the command answers
+down in ticks, so the game gets a data sector at the pace of a real disc (75 a second, 150 with the double speed bit of
+the CD mode) although it is read from the hard disk. The hook is the scheduler: `cave_cdspeed.py` divides the delay by 4
+when the callback is the tick, the delay is the tick length and the CD mode (`+0x2734` of the CD controller, TOC slot
+`-0x7c60`) has neither the XA-ADPCM bit (`0x40`) nor the CD-DA bit (`0x01`). A stream that has to play at the pace of the
+disc (an FMV with voices, a CD music track) keeps it. The delays that time the commands (the start of a read, a seek) go
+through other callbacks and stay as they are: dividing them too (v2.25 and v2.26) left Dino Crisis in a loop on the
+sectors 637 to 660 after the PS logo. Tested in the PowerPC interpreter, and Dino Crisis checked live on the console;
+the speed up was not timed.
 
 ### 14. Overclock (off, SELECT + R1 / SELECT + L1)
 

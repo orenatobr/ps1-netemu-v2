@@ -1260,24 +1260,37 @@ def test_the_end_adjust_stops_at_its_limit(cave_elf):
     assert cpu.rd(ADJ_END, 4) == D.MAX_END
 
 
-# ---- CD-ROM: data sectors arrive faster (the loading time of games that run from the HD) ---------------
+# ---- CD-ROM: the CD tick runs faster (the loading time of games that run from the HD) ------------------
 
 import cave_cdspeed as CD
 
 CD_STATE = 0x10100000  # fake CD controller state; the TOC slot holds its address
 CD_MODE = 0x2734
-ONE_X, TWO_X = 451584, 225792  # cycles per sector at 75 and 150 sectors a second
+ONE_X, TWO_X = 451584, 225792  # cycles per sector at 75 and at 150 sectors a second; TWO_X is also the tick
 SCHEDULER, SCHEDULER_BODY = 0x105E68, 0x105E6C
+TICK_CODE = 0xDEC48  # the tick handler of the CD controller
+COMMAND_SLOTS = (-0x7BEC, -0x7BE8, -0x7BE4)  # the callbacks that time the start of a read (answers to commands)
 
 
-def _scheduled_delay(elf, delay, mode, mode_known=True):
-    """The delay the scheduler body sees when it is called with `delay` while the CD mode is `mode`."""
+def _slot(elf, slot):
+    return Cpu(elf).rd(TOC + slot, 4)
+
+
+def _scheduled_delay(elf, delay, mode, slot=CD.TICK_CALLBACK_SLOT):
+    """The delay the scheduler body sees when `delay` is scheduled for the callback in `slot` and the CD mode is `mode`."""
     cpu = Cpu(elf)
-    cpu.r[1], cpu.r[2], cpu.r[3] = STACK, TOC, delay & M32
+    cpu.r[1], cpu.r[2], cpu.r[3], cpu.r[4] = STACK, TOC, delay & M32, _slot(elf, slot)
     cpu.wr(TOC + CD.CD_STATE_SLOT, 4, CD_STATE)
     cpu.wr(CD_STATE + CD_MODE, 4, mode)
     cpu.run(SCHEDULER, {SCHEDULER_BODY})
     return cpu.r[3] & M32, cpu.r[1]
+
+
+def test_the_tick_slot_holds_the_descriptor_of_the_cd_tick_handler(elfs):
+    cpu = Cpu(elfs[0])
+    assert cpu.rd(cpu.rd(TOC + CD.TICK_CALLBACK_SLOT, 4), 4) == TICK_CODE
+    for slot in COMMAND_SLOTS:
+        assert cpu.rd(cpu.rd(TOC + slot, 4), 4) != TICK_CODE
 
 
 @pytest.mark.parametrize("mode", [0x00, 0x20, 0x80, 0xA0, 0x40, 0x01, 0xC1])
@@ -1286,21 +1299,27 @@ def test_the_stock_scheduler_keeps_every_delay(elfs, delay, mode):
     assert _scheduled_delay(elfs[0], delay, mode) == (delay, STACK - 0xB0)
 
 
-@pytest.mark.parametrize("delay", [ONE_X, TWO_X])
 @pytest.mark.parametrize("mode", [0x00, 0x20, 0x80, 0xA0, 0x08, 0x10, 0x04, 0x02, 0x3E])
-def test_data_sectors_arrive_four_times_faster(elfs, delay, mode):
-    assert _scheduled_delay(elfs[1], delay, mode) == (delay // 4, STACK - 0xB0)
+def test_the_tick_runs_four_times_faster(elfs, mode):
+    assert _scheduled_delay(elfs[1], TWO_X, mode) == (TWO_X // 4, STACK - 0xB0)
 
 
-@pytest.mark.parametrize("delay", [ONE_X, TWO_X])
 @pytest.mark.parametrize("mode", [0x40, 0x60, 0xC0, 0xE0, 0x01, 0x81, 0xC1, 0x41])
-def test_xa_and_cd_da_streams_keep_the_pace_of_the_disc(elfs, delay, mode):
-    assert _scheduled_delay(elfs[1], delay, mode) == (delay, STACK - 0xB0)
+def test_xa_and_cd_da_streams_keep_the_pace_of_the_disc(elfs, mode):
+    assert _scheduled_delay(elfs[1], TWO_X, mode) == (TWO_X, STACK - 0xB0)
+
+
+@pytest.mark.parametrize("slot", COMMAND_SLOTS)
+@pytest.mark.parametrize("delay", [ONE_X, TWO_X])
+@pytest.mark.parametrize("mode", [0x00, 0x80, 0xA0])
+def test_command_delays_are_left_alone(elfs, slot, delay, mode):
+    """Dino Crisis stalled at the PS logo when the answer to the read command came 4 times earlier."""
+    assert _scheduled_delay(elfs[1], delay, mode, slot) == (delay, STACK - 0xB0)
 
 
 @pytest.mark.parametrize("delay", [0, 1, 2176, 22579, 225791, 225793, 451583, 451585, 564480, 33868800])
 @pytest.mark.parametrize("mode", [0x00, 0x80])
-def test_any_other_delay_is_left_alone(elfs, delay, mode):
+def test_any_other_tick_delay_is_left_alone(elfs, delay, mode):
     assert _scheduled_delay(elfs[1], delay, mode) == (delay, STACK - 0xB0)
 
 
