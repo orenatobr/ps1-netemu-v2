@@ -186,8 +186,32 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
   `argv[5]`. Another launcher would fall back to feature 6.
 - Multi-disc grouping depends on the `(Disc N)` naming; `CD2` or `Disc2` get one card per disc.
 - Analog is not forced at boot: a game that never talks DualShock cannot be told apart from a digital-only game.
+- A disc image whose root directory is marked hidden (Legend of Mana) does not mount: error 80028F17, with the stock
+  emulator too. Open the installer app once (it repairs the image) or run `unhide_iso.py` (next section).
 - The patched binary is Sony's code with a few dozen words changed plus about 2.5 KB of new code. Use it on your
   own console only; this repository is private for that reason, so downloads need the owner's login.
+
+## A game that does not start: error 80028F17 with a hidden root directory
+
+Legend of Mana (USA) shows a black screen with the console light blinking and then error `80028F17`, with the stock
+`ps1_netemu` as well as the patched one. The emulator is not at fault: every entry of the root directory of that
+image, `SYSTEM.CNF` and `SLUS_010.13` included, has the ISO9660 hidden flag (flags `1` and `3`; Dino Crisis has `0` and
+`2`). The PS3 does not list hidden entries of a mounted disc, so webMAN leaves `/dev_bdvd` empty and the emulator, started
+without a disc, dies in under 4 seconds (seen through PS3MAPI: the process lives less than 4 s and never reads a sector).
+Measured: with the flag cleared the disc mounts (`/dev_bdvd` lists `ANA`, `BIN`, `FUKU`...) and the emulator keeps
+running and reading the disc.
+
+The installer app does this for you: each time it opens it scans `/dev_hdd0/PSXISO` (`.bin`, `.img`, `.iso`, `.mdf`),
+clears the flag of any image that has it and lists the images it repaired on the screen. Opening the app once is enough;
+an image with nothing hidden is not touched. The same repair as a command, for a copy on a computer:
+
+```
+python unhide_iso.py "Legend of Mana (USA).bin" --dry-run   # counts the hidden entries (16 for Legend of Mana)
+python unhide_iso.py "Legend of Mana (USA).bin"             # clears them in place; keep a copy of the original
+```
+
+Only the sector of the root directory changes, one byte per entry; `SYSTEM.CNF`, the executable and the data are
+untouched. The raw sector checksum (EDC/ECC) is not recomputed and nothing checks it.
 
 ## Code map
 
@@ -196,6 +220,7 @@ webMAN's FTP cannot rename over an existing file (delete the old one first), and
 | `ps1_netemu_patch.py` | Unpacks the SELF, applies every patch, grows the text segment (`extend_text`), repacks, recomputes the hashes |
 | `ps3mapi_patch.py` | The in-place word patches (`CODE`, `CONSTANTS`) and the live patcher |
 | `cave_dpad.py` (also the Parasite Eve d-pad), `cave_analog.py`, `cave_memcard.py`, `cave_percard.py`, `cave_fullscreen.py`, `nodither.py` | New code placed in the 4 KB text segment extension (`0x1a9380`) |
+| `unhide_iso.py` | Clears the ISO9660 hidden flag of the root directory of a disc image (Legend of Mana) |
 | `ppcasm.py` | Tiny PowerPC assembler with labels, only what the caves use |
 | `tests/` | `test_patch.py` (container), `test_emulation.py` (runs the real emulator code in a PowerPC interpreter) |
 | `installer/` | The PS3 app (PSL1GHT), its tests and the packaging tools |
